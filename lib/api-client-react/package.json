@@ -1,0 +1,22 @@
+{
+  "name": "@workspace/api-client-react",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "catalog:"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.10"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "smoke": "vitest run"
+  }
+}

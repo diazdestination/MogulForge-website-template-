@@ -1,0 +1,204 @@
+kind = "web"
+previewPath = "/"
+title = "Painless Roofing Website"
+description = "Public conversion website for Painless Roofing & Water Restoration: homepage with four intent pathways, multi-step roof-assessment lead capture with consent, mock storm-check page, and first-party analytics funnel events."
+version = "1.0.0"
+id = "artifacts/website"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19161
+
+[services.development]
+run = "pnpm --filter @workspace/website run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/website", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/website/dist/public"
+
+[[services.production.rewrites]]
+from = "/storm-check"
+to = "/storm-check/index.html"
+
+[[services.production.rewrites]]
+from = "/assessment"
+to = "/assessment/index.html"
+
+[[services.production.rewrites]]
+from = "/services"
+to = "/services/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas"
+to = "/service-areas/index.html"
+
+[[services.production.rewrites]]
+from = "/about"
+to = "/about/index.html"
+
+[[services.production.rewrites]]
+from = "/gallery"
+to = "/gallery/index.html"
+
+[[services.production.rewrites]]
+from = "/reviews"
+to = "/reviews/index.html"
+
+[[services.production.rewrites]]
+from = "/financing"
+to = "/financing/index.html"
+
+[[services.production.rewrites]]
+from = "/resources"
+to = "/resources/index.html"
+
+[[services.production.rewrites]]
+from = "/contact"
+to = "/contact/index.html"
+
+[[services.production.rewrites]]
+from = "/nationwide"
+to = "/nationwide/index.html"
+
+[[services.production.rewrites]]
+from = "/privacy"
+to = "/privacy/index.html"
+
+[[services.production.rewrites]]
+from = "/terms"
+to = "/terms/index.html"
+
+[[services.production.rewrites]]
+from = "/sms-consent"
+to = "/sms-consent/index.html"
+
+[[services.production.rewrites]]
+from = "/accessibility"
+to = "/accessibility/index.html"
+
+[[services.production.rewrites]]
+from = "/services/roof-repair"
+to = "/services/roof-repair/index.html"
+
+[[services.production.rewrites]]
+from = "/services/roof-replacement"
+to = "/services/roof-replacement/index.html"
+
+[[services.production.rewrites]]
+from = "/services/roof-installation"
+to = "/services/roof-installation/index.html"
+
+[[services.production.rewrites]]
+from = "/services/metal-roofing"
+to = "/services/metal-roofing/index.html"
+
+[[services.production.rewrites]]
+from = "/services/commercial-roofing"
+to = "/services/commercial-roofing/index.html"
+
+[[services.production.rewrites]]
+from = "/services/storm-damage"
+to = "/services/storm-damage/index.html"
+
+[[services.production.rewrites]]
+from = "/services/insurance-claims"
+to = "/services/insurance-claims/index.html"
+
+[[services.production.rewrites]]
+from = "/services/emergency-roofing"
+to = "/services/emergency-roofing/index.html"
+
+[[services.production.rewrites]]
+from = "/services/water-damage-restoration"
+to = "/services/water-damage-restoration/index.html"
+
+[[services.production.rewrites]]
+from = "/services/siding"
+to = "/services/siding/index.html"
+
+[[services.production.rewrites]]
+from = "/services/gutters"
+to = "/services/gutters/index.html"
+
+[[services.production.rewrites]]
+from = "/services/roof-inspection"
+to = "/services/roof-inspection/index.html"
+
+[[services.production.rewrites]]
+from = "/services/maintenance-plans"
+to = "/services/maintenance-plans/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas/canton-ga"
+to = "/service-areas/canton-ga/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas/atlanta-ga"
+to = "/service-areas/atlanta-ga/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas/dawsonville-ga"
+to = "/service-areas/dawsonville-ga/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas/cumming-ga"
+to = "/service-areas/cumming-ga/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas/alpharetta-ga"
+to = "/service-areas/alpharetta-ga/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas/gainesville-ga"
+to = "/service-areas/gainesville-ga/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas/woodstock-ga"
+to = "/service-areas/woodstock-ga/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas/marietta-ga"
+to = "/service-areas/marietta-ga/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas/roswell-ga"
+to = "/service-areas/roswell-ga/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas/acworth-ga"
+to = "/service-areas/acworth-ga/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas/kennesaw-ga"
+to = "/service-areas/kennesaw-ga/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas/cartersville-ga"
+to = "/service-areas/cartersville-ga/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas/ball-ground-ga"
+to = "/service-areas/ball-ground-ga/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas/jasper-ga"
+to = "/service-areas/jasper-ga/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas/blue-ridge-ga"
+to = "/service-areas/blue-ridge-ga/index.html"
+
+[[services.production.rewrites]]
+from = "/service-areas/rome-ga"
+to = "/service-areas/rome-ga/index.html"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19161"
+BASE_PATH = "/"

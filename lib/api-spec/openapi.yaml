@@ -1,0 +1,4902 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: Painless GrowthOS API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: Auth
+    description: Browser and mobile authentication endpoints.
+  - name: me
+    description: Current user context
+  - name: contacts
+  - name: properties
+  - name: leads
+  - name: tasks
+  - name: appointments
+  - name: activities
+  - name: users
+  - name: public
+    description: Public (unauthenticated) endpoints
+  - name: portal
+    description: Homeowner portal (OTP-verified homeowner sessions)
+  - name: conversations
+    description: AI Concierge conversations
+  - name: analytics
+  - name: audit
+  - name: dashboard
+  - name: settings
+  - name: templates
+  - name: automations
+  - name: webhooks
+  - name: tags
+  - name: api-keys
+    description: Org-scoped API key management
+  - name: estimates
+    description: Job estimates linked to leads
+  - name: projects
+    description: Production projects for won jobs
+  - name: assistant
+    description: CRM AI assistant
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /auth/user:
+    get:
+      tags: [Auth]
+      operationId: getCurrentAuthUser
+      summary: Get the currently authenticated user
+      parameters:
+        - $ref: "#/components/parameters/AuthorizationSessionHeader"
+        - $ref: "#/components/parameters/SessionCookie"
+      responses:
+        "200":
+          description: Auth status resolved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUserEnvelope"
+  /login:
+    get:
+      tags: [Auth]
+      operationId: beginBrowserLogin
+      summary: Start the browser OIDC login flow
+      parameters:
+        - name: returnTo
+          in: query
+          required: false
+          description: Relative path to redirect to after login (must start with `/`). Defaults to `/`.
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirect to the OIDC authorization endpoint.
+  /callback:
+    get:
+      tags: [Auth]
+      operationId: handleBrowserLoginCallback
+      summary: Complete the browser OIDC login flow
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: iss
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uri
+      responses:
+        "302":
+          description: Redirect to the `returnTo` path on success (defaults to `/`) or `/api/login` on failure.
+  /logout:
+    get:
+      tags: [Auth]
+      operationId: logoutBrowserSession
+      summary: Clear the session and begin OIDC logout
+      parameters:
+        - $ref: "#/components/parameters/AuthorizationSessionHeader"
+        - $ref: "#/components/parameters/SessionCookie"
+        - name: returnTo
+          in: query
+          required: false
+          schema:
+            type: string
+            default: /
+      responses:
+        "302":
+          description: Redirect to the OIDC provider logout URL with a post-logout redirect back to the validated `returnTo` path.
+  /mobile-auth/token-exchange:
+    post:
+      tags: [Auth]
+      operationId: exchangeMobileAuthorizationCode
+      summary: Exchange a mobile OIDC code for a session token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MobileTokenExchangeRequest"
+      responses:
+        "200":
+          description: Session created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MobileTokenExchangeSuccess"
+        "400":
+          description: Missing or invalid required fields.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Token did not contain usable claims.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: Token exchange failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /mobile-auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logoutMobileSession
+      summary: Delete a mobile session token
+      parameters:
+        - $ref: "#/components/parameters/AuthorizationSessionHeader"
+      responses:
+        "200":
+          description: Logout processed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogoutSuccess"
+  /v1/me:
+    get:
+      operationId: getMe
+      tags: [me]
+      summary: Get the current CRM user with organization context
+      responses:
+        "200":
+          description: Current member profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberProfile"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: List members of the organization
+      responses:
+        "200":
+          description: Members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Member"
+  /v1/users/invite:
+    post:
+      operationId: inviteUser
+      tags: [users]
+      summary: Invite a new team member by email (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InviteUserInput"
+      responses:
+        "201":
+          description: Invited member (activates on first sign-in)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitedMember"
+        "400":
+          description: Invalid invite
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: A member with this email already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/users/{id}:
+    patch:
+      operationId: updateUser
+      tags: [users]
+      summary: Change a member's role or active status (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserInput"
+      responses:
+        "200":
+          description: Updated member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Member"
+        "400":
+          description: Invalid change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "403":
+          description: Not allowed (e.g. changing your own role or an owner)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/users/{id}/resend-invite:
+    post:
+      operationId: resendInvite
+      tags: [users]
+      summary: Re-send the invite email for a pending invite (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Result of the resend attempt
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InviteEmailResult"
+        "400":
+          description: Not a pending invite or missing email
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/api-keys:
+    get:
+      operationId: listApiKeys
+      tags: [api-keys]
+      summary: List API keys (admin only)
+      responses:
+        "200":
+          description: API keys (hashes never returned)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApiKey"
+    post:
+      operationId: createApiKey
+      tags: [api-keys]
+      summary: Create an API key — the full key is returned once (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApiKeyInput"
+      responses:
+        "201":
+          description: Created key, including the one-time full secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyCreated"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/api-keys/{id}:
+    patch:
+      operationId: updateApiKey
+      tags: [api-keys]
+      summary: Update an active API key's name and/or expiration date (admin only)
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateApiKeyInput"
+      responses:
+        "200":
+          description: Updated key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKey"
+        "400":
+          description: Invalid request (e.g. past date)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      operationId: revokeApiKey
+      tags: [api-keys]
+      summary: Revoke an API key (admin only)
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "204":
+          description: Revoked
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/contacts:
+    get:
+      operationId: listContacts
+      tags: [contacts]
+      summary: List contacts
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Max rows to return (server caps at 200).
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          required: false
+          description: Number of rows to skip, for paging past earlier results (server treats negatives as 0).
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Contacts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Contact"
+    post:
+      operationId: createContact
+      tags: [contacts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contact"
+  /v1/contacts/{id}:
+    get:
+      operationId: getContact
+      tags: [contacts]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Contact
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contact"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    patch:
+      operationId: updateContact
+      tags: [contacts]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ContactUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Contact"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      operationId: deleteContact
+      tags: [contacts]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/properties:
+    get:
+      operationId: listProperties
+      tags: [properties]
+      parameters:
+        - name: contactId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          description: Max rows to return (server caps at 200).
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          required: false
+          description: Number of rows to skip, for paging past earlier results (server treats negatives as 0).
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Properties
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Property"
+    post:
+      operationId: createProperty
+      tags: [properties]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PropertyInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Property"
+  /v1/properties/{id}:
+    get:
+      operationId: getProperty
+      tags: [properties]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Property
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Property"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    patch:
+      operationId: updateProperty
+      tags: [properties]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PropertyUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Property"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/leads:
+    get:
+      operationId: listLeads
+      tags: [leads]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/LeadStatus"
+        - name: assignedUserId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: source
+          in: query
+          required: false
+          description: Filter by lead source value (e.g. 'nationwide-inquiry').
+          schema:
+            type: string
+        - name: search
+          in: query
+          required: false
+          description: Case-insensitive match on the contact name or service type.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Max rows to return (server caps at 200).
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          required: false
+          description: Number of rows to skip, for paging past earlier results (server treats negatives as 0).
+          schema:
+            type: integer
+        - name: hasUnreadPortalMessage
+          in: query
+          required: false
+          description: When true, return only leads where the most recent portal message is newer than the most recent team reply.
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Leads
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Lead"
+    post:
+      operationId: createLead
+      tags: [leads]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LeadInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lead"
+  /v1/leads/bulk:
+    post:
+      operationId: bulkUpdateLeads
+      tags: [leads]
+      summary: Apply a bulk action (stage change, assign, tag) to many leads
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkLeadActionRequest"
+      responses:
+        "200":
+          description: Bulk action result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkLeadActionResult"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/leads/duplicates:
+    get:
+      operationId: listDuplicateLeads
+      tags: [leads]
+      summary: List groups of likely duplicate leads (same contact phone, email, or property address)
+      responses:
+        "200":
+          description: Duplicate lead groups
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DuplicateLeadGroup"
+  /v1/leads/{id}/merge:
+    post:
+      operationId: mergeLead
+      tags: [leads]
+      summary: Merge a duplicate lead into this lead — activities and tags move to the survivor, the source lead is marked lost
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MergeLeadRequest"
+      responses:
+        "200":
+          description: Surviving lead after merge
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lead"
+        "400":
+          description: Invalid merge (e.g. merging a lead into itself)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Surviving or source lead not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/saved-filters:
+    get:
+      operationId: listSavedFilters
+      tags: [leads]
+      summary: List the current user's saved filters
+      responses:
+        "200":
+          description: Saved filters
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SavedFilter"
+    post:
+      operationId: createSavedFilter
+      tags: [leads]
+      summary: Save a filter preset for the current user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SavedFilterInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SavedFilter"
+        "400":
+          description: Invalid saved filter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/saved-filters/{id}:
+    delete:
+      operationId: deleteSavedFilter
+      tags: [leads]
+      summary: Delete one of the current user's saved filters
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/leads/{id}:
+    get:
+      operationId: getLead
+      tags: [leads]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Lead
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lead"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    patch:
+      operationId: updateLead
+      tags: [leads]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LeadUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lead"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/estimates:
+    get:
+      operationId: listEstimates
+      tags: [estimates]
+      parameters:
+        - name: leadId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/EstimateStatus"
+        - name: limit
+          in: query
+          required: false
+          description: Max rows to return (server caps at 200).
+          schema:
+            type: integer
+        - name: offset
+          in: query
+          required: false
+          description: Number of rows to skip, for paging past earlier results (server treats negatives as 0).
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Estimates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Estimate"
+    post:
+      operationId: createEstimate
+      tags: [estimates]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EstimateInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Estimate"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/estimates/{id}:
+    get:
+      operationId: getEstimate
+      tags: [estimates]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Estimate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Estimate"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    patch:
+      operationId: updateEstimate
+      tags: [estimates]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EstimateUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Estimate"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      operationId: deleteEstimate
+      tags: [estimates]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/projects:
+    get:
+      operationId: listProjects
+      tags: [projects]
+      parameters:
+        - name: leadId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/ProjectStatus"
+      responses:
+        "200":
+          description: Projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+    post:
+      operationId: createProject
+      tags: [projects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/projects/{id}:
+    get:
+      operationId: getProject
+      tags: [projects]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    patch:
+      operationId: updateProject
+      tags: [projects]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      operationId: deleteProject
+      tags: [projects]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/leads/{id}/activities:
+    get:
+      operationId: listLeadActivities
+      tags: [activities]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Activity timeline for a lead
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Activity"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    post:
+      operationId: createLeadActivity
+      tags: [activities]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActivityInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/leads/{id}/send-email:
+    post:
+      operationId: sendLeadEmail
+      tags: [leads]
+      summary: Compose and send an email to the lead's contact via the connected Gmail account
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LeadSendEmailInput"
+      responses:
+        "201":
+          description: Email sent; returns the timeline activity that logged it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "400":
+          description: Invalid email or the lead's contact has no email address
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Lead not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "502":
+          description: Gmail send failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: Gmail is not connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/leads/{id}/photos/request-url:
+    post:
+      operationId: requestLeadPhotoUploadUrl
+      tags: [leads]
+      summary: Request a presigned upload URL for a rep-uploaded lead photo
+      description: Returns a short-lived presigned PUT URL and objectPath. The client PUTs the file directly to storage, then calls POST /leads/{id}/photos to register the path.
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadUrlRequest"
+      responses:
+        "200":
+          description: Presigned URL ready for direct upload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadUrlResponse"
+        "400":
+          description: Invalid file type or oversized file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "403":
+          description: Caller lacks crm.write permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Lead not found or belongs to a different org
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/leads/{id}/photos:
+    post:
+      operationId: attachLeadPhotos
+      tags: [leads]
+      summary: Attach already-uploaded photos to a lead's timeline
+      description: Validates each objectPath, inserts a photos_attached activity, and returns it.
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttachLeadPhotosRequest"
+      responses:
+        "201":
+          description: Activity created; returns the new photos_attached entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Activity"
+        "400":
+          description: Invalid photoPaths
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "403":
+          description: Caller lacks crm.write permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Lead not found or belongs to a different org
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      operationId: deleteLeadPhoto
+      tags: [leads]
+      summary: Remove a single photo from a lead's timeline
+      description: Removes the given objectPath from the matching photos_attached activity. If it was the last photo in that activity, the activity itself is deleted.
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteLeadPhotoRequest"
+      responses:
+        "204":
+          description: Photo removed (activity deleted if it was the last photo)
+        "400":
+          description: objectPath not found on this lead
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "403":
+          description: Caller lacks crm.write permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Lead not found or belongs to a different org
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/tasks:
+    get:
+      operationId: listTasks
+      tags: [tasks]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/TaskStatus"
+        - name: assignedUserId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tasks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CrmTask"
+    post:
+      operationId: createTask
+      tags: [tasks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CrmTaskInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CrmTask"
+  /v1/tasks/{id}:
+    patch:
+      operationId: updateTask
+      tags: [tasks]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CrmTaskUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CrmTask"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      operationId: deleteTask
+      tags: [tasks]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/appointments:
+    get:
+      operationId: listAppointments
+      tags: [appointments]
+      parameters:
+        - name: leadId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Appointments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Appointment"
+    post:
+      operationId: createAppointment
+      tags: [appointments]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppointmentInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+        "409":
+          description: Inspection window already at capacity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/appointments/{id}:
+    patch:
+      operationId: updateAppointment
+      tags: [appointments]
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppointmentUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: Inspection window already at capacity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Aggregate pipeline metrics for the organization
+      responses:
+        "200":
+          description: Summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+  /v1/assistant/history:
+    get:
+      operationId: getAssistantHistory
+      tags: [assistant]
+      summary: Retrieve the authenticated user's saved assistant conversation history
+      responses:
+        "200":
+          description: Saved history for the current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssistantHistory"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    post:
+      operationId: saveAssistantHistory
+      tags: [assistant]
+      summary: Persist the authenticated user's assistant conversation history (replaces any existing history)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssistantHistorySaveInput"
+      responses:
+        "200":
+          description: Updated history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssistantHistory"
+        "400":
+          description: Invalid history payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/assistant/chat:
+    post:
+      operationId: sendAssistantChat
+      tags: [assistant]
+      summary: Ask the CRM AI assistant a question about the organization's data (streams server-sent events)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssistantChatInput"
+      responses:
+        "200":
+          description: Server-sent event stream of the assistant's answer
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          description: Invalid chat payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: AI assistant is not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/audit-events:
+    get:
+      operationId: listAuditEvents
+      tags: [audit]
+      summary: List recent audit events (admin only)
+      parameters:
+        - name: action
+          in: query
+          required: false
+          description: Only return events with this exact action (e.g. `api_key.brute_force_blocked`).
+          schema:
+            type: string
+        - name: since
+          in: query
+          required: false
+          description: Only return events created at or after this timestamp.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Audit events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditEvent"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/public/assessments:
+    post:
+      operationId: submitAssessment
+      tags: [public]
+      summary: Public roof-assessment lead capture
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssessmentSubmission"
+      responses:
+        "201":
+          description: Lead captured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssessmentResult"
+        "400":
+          description: Invalid submission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/public/uploads/request-url:
+    post:
+      operationId: requestPublicUploadUrl
+      tags: [public]
+      summary: Request a presigned URL for uploading a damage photo (image types only, max 10MB)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadUrlRequest"
+      responses:
+        "200":
+          description: Presigned upload URL generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadUrlResponse"
+        "400":
+          description: Missing or invalid required fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "500":
+          description: Failed to generate upload URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/storage/objects/{objectPath}:
+    get:
+      operationId: getStorageObject
+      tags: [storage]
+      summary: Serve an uploaded object (authenticated CRM users only)
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Object path within the private object dir (e.g. `uploads/some-uuid`).
+      responses:
+        "200":
+          description: Object content streamed with correct Content-Type
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Object not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/public/storm-check:
+    post:
+      operationId: checkStormActivity
+      tags: [public]
+      summary: Check recent storm activity near an address (demonstration data until a real weather provider is connected)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StormCheckRequest"
+      responses:
+        "200":
+          description: Storm activity result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StormCheckResult"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/public/concierge/conversations:
+    post:
+      operationId: startConciergeConversation
+      tags: [public, conversations]
+      summary: Start an AI Roof Concierge conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConciergeStartRequest"
+      responses:
+        "201":
+          description: Conversation started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConciergeReply"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/public/concierge/conversations/{id}/messages:
+    post:
+      operationId: sendConciergeMessage
+      tags: [public, conversations]
+      summary: Send a visitor message to an active concierge conversation
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConciergeMessageRequest"
+      responses:
+        "200":
+          description: Assistant reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConciergeReply"
+        "400":
+          description: Invalid message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Conversation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/public/concierge/transcriptions:
+    post:
+      operationId: transcribeConciergeAudio
+      tags: [public, conversations]
+      summary: Transcribe a short concierge voice note into text
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConciergeTranscriptionRequest"
+      responses:
+        "200":
+          description: Transcribed text
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConciergeTranscriptionResponse"
+        "400":
+          description: Invalid or too-large audio payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "503":
+          description: Transcription is not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/leads/{id}/conversations:
+    get:
+      operationId: listLeadConversations
+      tags: [conversations]
+      summary: List AI concierge conversations (with transcripts) for a lead
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Conversations linked to the lead
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConciergeConversation"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/public/analytics-events:
+    post:
+      operationId: trackAnalyticsEvent
+      tags: [analytics]
+      summary: Capture a first-party analytics event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnalyticsEventInput"
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AcceptedEnvelope"
+        "400":
+          description: Invalid event
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/public/site-config:
+    get:
+      operationId: getPublicSiteConfig
+      tags: [public]
+      summary: Public site configuration for the marketing website
+      description: Business profile plus the currently active services and service areas, as configured by admins in settings. Unauthenticated.
+      responses:
+        "200":
+          description: Site configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicSiteConfig"
+  /v1/public/google-reviews:
+    get:
+      operationId: getPublicGoogleReviews
+      tags: [public]
+      summary: Live Google reviews for the marketing website
+      description: Fetches reviews from the Google Places API, cached for 24 hours. Returns an empty list with isFallback=true when the API key is not configured or the API is unavailable.
+      responses:
+        "200":
+          description: Google reviews
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoogleReviewsResponse"
+  /v1/dashboard/marketing:
+    get:
+      operationId: getMarketingSummary
+      tags: [dashboard]
+      summary: Organic traffic summary — landing pages and referrers, including AI answer-engine referrals
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+            default: 30
+      responses:
+        "200":
+          description: Marketing summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketingSummary"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get organization settings
+      responses:
+        "200":
+          description: Organization settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgSettings"
+    put:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update organization settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrgSettingsInput"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgSettings"
+        "400":
+          description: Invalid settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/settings/inspection-availability:
+    get:
+      operationId: getInspectionAvailability
+      tags: [settings]
+      summary: Effective inspection availability (defaults merged with org overrides, sanitized)
+      responses:
+        "200":
+          description: Effective inspection availability
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InspectionAvailabilitySettings"
+  /v1/settings/email-provider:
+    get:
+      operationId: getEmailProviderStatus
+      tags: [settings]
+      summary: Active outbound email provider and sending account
+      responses:
+        "200":
+          description: Email provider status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailProviderStatus"
+  /v1/settings/sms-provider:
+    get:
+      operationId: getSmsProviderStatus
+      tags: [settings]
+      summary: Active outbound SMS provider and sending phone number
+      responses:
+        "200":
+          description: SMS provider status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmsProviderStatus"
+  /v1/templates:
+    get:
+      operationId: listTemplates
+      tags: [templates]
+      summary: List message templates
+      responses:
+        "200":
+          description: Templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MessageTemplate"
+    post:
+      operationId: createTemplate
+      tags: [templates]
+      summary: Create a message template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageTemplateInput"
+      responses:
+        "201":
+          description: Created template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageTemplate"
+        "400":
+          description: Invalid template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/templates/{id}:
+    patch:
+      operationId: updateTemplate
+      tags: [templates]
+      summary: Update a message template
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageTemplateUpdate"
+      responses:
+        "200":
+          description: Updated template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageTemplate"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      operationId: deleteTemplate
+      tags: [templates]
+      summary: Deactivate a message template
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "204":
+          description: Deactivated
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/automations:
+    get:
+      operationId: listAutomations
+      tags: [automations]
+      summary: List automation rules
+      responses:
+        "200":
+          description: Automations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Automation"
+    post:
+      operationId: createAutomation
+      tags: [automations]
+      summary: Create an automation rule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutomationInput"
+      responses:
+        "201":
+          description: Created automation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Automation"
+        "400":
+          description: Invalid automation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/automations/{id}:
+    patch:
+      operationId: updateAutomation
+      tags: [automations]
+      summary: Update an automation rule
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutomationUpdate"
+      responses:
+        "200":
+          description: Updated automation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Automation"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      operationId: deleteAutomation
+      tags: [automations]
+      summary: Deactivate an automation rule
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "204":
+          description: Deactivated
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/automation-runs:
+    get:
+      operationId: listAutomationRuns
+      tags: [automations]
+      summary: List automation run history
+      parameters:
+        - name: automationId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AutomationRun"
+  /v1/webhooks:
+    get:
+      operationId: listWebhooks
+      tags: [webhooks]
+      summary: List webhook endpoints
+      responses:
+        "200":
+          description: Webhook endpoints (secrets omitted)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WebhookEndpoint"
+    post:
+      operationId: createWebhook
+      tags: [webhooks]
+      summary: Register a webhook endpoint
+      description: The signing secret is returned only in this response — store it securely.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEndpointInput"
+      responses:
+        "201":
+          description: Created endpoint including its signing secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpointWithSecret"
+        "400":
+          description: Invalid endpoint
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/webhooks/{id}:
+    patch:
+      operationId: updateWebhook
+      tags: [webhooks]
+      summary: Update a webhook endpoint
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEndpointUpdate"
+      responses:
+        "200":
+          description: Updated endpoint
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpoint"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      operationId: deleteWebhook
+      tags: [webhooks]
+      summary: Deactivate a webhook endpoint
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "204":
+          description: Deactivated
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/webhooks/{id}/rotate-secret:
+    post:
+      operationId: rotateWebhookSecret
+      tags: [webhooks]
+      summary: Rotate a webhook endpoint's signing secret
+      description: >-
+        Issues a fresh signing secret, returned only in this response.
+        During the optional grace period, deliveries carry `v1=` signature
+        entries for both the new and the old secret so receivers can switch
+        without dropping deliveries; afterwards only the new secret is used.
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RotateWebhookSecretInput"
+      responses:
+        "200":
+          description: Endpoint with its new one-time signing secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpointWithSecret"
+        "400":
+          description: Invalid rotation request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/webhooks/{id}/previous-secret:
+    delete:
+      operationId: expireWebhookPreviousSecret
+      tags: [webhooks]
+      summary: End a secret rotation grace window early
+      description: >-
+        Immediately stops honoring the old signing secret from the most
+        recent rotation. No-op semantics — returns the endpoint even when no
+        grace window is active.
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Endpoint with the grace window ended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookEndpoint"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/webhook-deliveries:
+    get:
+      operationId: listWebhookDeliveries
+      tags: [webhooks]
+      summary: List webhook delivery log
+      parameters:
+        - name: endpointId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Deliveries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WebhookDelivery"
+  /v1/tags:
+    get:
+      operationId: listTags
+      tags: [tags]
+      summary: List tags
+      responses:
+        "200":
+          description: Tags
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Tag"
+    post:
+      operationId: createTag
+      tags: [tags]
+      summary: Create a tag
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TagInput"
+      responses:
+        "201":
+          description: Created tag
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tag"
+        "400":
+          description: Invalid tag
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/portal/login/request:
+    post:
+      operationId: requestPortalLoginCode
+      tags: [portal]
+      summary: Request a homeowner portal one-time sign-in code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalLoginRequest"
+      responses:
+        "202":
+          description: Code sent if the identifier matches a contact (generic response — never reveals whether it exists)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalLoginRequested"
+        "400":
+          description: Invalid identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/portal/login/verify:
+    post:
+      operationId: verifyPortalLoginCode
+      tags: [portal]
+      summary: Verify a one-time code and receive a portal session token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalLoginVerify"
+      responses:
+        "200":
+          description: Session issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalSession"
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Incorrect or expired code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/portal/overview:
+    get:
+      operationId: getPortalOverview
+      tags: [portal]
+      summary: Homeowner portal overview — contact, claims, timelines, appointments
+      parameters:
+        - $ref: "#/components/parameters/PortalTokenHeader"
+      responses:
+        "200":
+          description: Portal overview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalOverview"
+        "401":
+          description: Missing or expired portal session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/portal/claims/{id}/messages:
+    post:
+      operationId: sendPortalMessage
+      tags: [portal]
+      summary: Send a message to the team about a claim
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+        - $ref: "#/components/parameters/PortalTokenHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalMessage"
+      responses:
+        "201":
+          description: Message recorded on the claim timeline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalMessageSent"
+        "400":
+          description: Invalid message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing or expired portal session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Claim not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/portal/claims/{id}/conversation:
+    get:
+      operationId: getPortalConversation
+      tags: [portal]
+      summary: Full message history for one of the homeowner's own claims, oldest to newest
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+        - $ref: "#/components/parameters/PortalTokenHeader"
+      responses:
+        "200":
+          description: Full conversation thread (homeowner and team messages)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalConversation"
+        "401":
+          description: Missing or expired portal session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Claim not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/portal/claims/{id}/photos:
+    post:
+      operationId: addPortalClaimPhotos
+      tags: [portal]
+      summary: Attach additional damage photos to one of the homeowner's own claims
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+        - $ref: "#/components/parameters/PortalTokenHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PortalAddPhotos"
+      responses:
+        "201":
+          description: Photos attached to the claim timeline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortalPhotosAttached"
+        "400":
+          description: Invalid or non-image attachments
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "401":
+          description: Missing or expired portal session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Claim not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/portal/photos/objects/{objectPath}:
+    get:
+      operationId: getPortalPhoto
+      tags: [portal]
+      summary: Stream one of the homeowner's own damage photos
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Object path within the private object dir (e.g. `uploads/some-uuid`).
+        - $ref: "#/components/parameters/PortalTokenHeader"
+      responses:
+        "200":
+          description: Photo content streamed with correct Content-Type
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "401":
+          description: Missing or expired portal session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Photo not found or not owned by this homeowner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/portal/logout:
+    post:
+      operationId: logoutPortalSession
+      tags: [portal]
+      summary: Revoke the current portal session
+      parameters:
+        - $ref: "#/components/parameters/PortalTokenHeader"
+      responses:
+        "200":
+          description: Session revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+components:
+  parameters:
+    IdPathParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    AuthorizationSessionHeader:
+      name: Authorization
+      in: header
+      required: false
+      description: Opaque session token — `Bearer <sid>`.
+      schema:
+        type: string
+    PortalTokenHeader:
+      name: x-portal-token
+      in: header
+      required: true
+      description: Opaque homeowner portal session token.
+      schema:
+        type: string
+    SessionCookie:
+      name: sid
+      in: cookie
+      required: false
+      description: Browser session cookie.
+      schema:
+        type: string
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    AuthUser:
+      type: object
+      required: [id, email, firstName, lastName, profileImageUrl]
+      properties:
+        id:
+          type: string
+        email:
+          type: [string, "null"]
+          format: email
+        firstName:
+          type: [string, "null"]
+        lastName:
+          type: [string, "null"]
+        profileImageUrl:
+          type: [string, "null"]
+    AuthUserEnvelope:
+      type: object
+      required: [user]
+      properties:
+        user:
+          oneOf:
+            - $ref: "#/components/schemas/AuthUser"
+            - type: "null"
+    MobileTokenExchangeRequest:
+      type: object
+      required: [code, code_verifier, redirect_uri, state]
+      properties:
+        code:
+          type: string
+          minLength: 1
+        code_verifier:
+          type: string
+          minLength: 1
+        redirect_uri:
+          type: string
+          minLength: 1
+          format: uri
+        state:
+          type: string
+          minLength: 1
+        nonce:
+          type: string
+          minLength: 1
+    MobileTokenExchangeSuccess:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+    LogoutSuccess:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          const: true
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+    PortalLoginRequest:
+      type: object
+      required: [identifier]
+      properties:
+        identifier:
+          type: string
+          minLength: 3
+          maxLength: 254
+          description: Email address or phone number used on the assessment.
+    PortalLoginRequested:
+      type: object
+      required: [sent, channel]
+      properties:
+        sent:
+          type: boolean
+        channel:
+          type: string
+          enum: [email, sms]
+    PortalLoginVerify:
+      type: object
+      required: [identifier, code]
+      properties:
+        identifier:
+          type: string
+          minLength: 3
+          maxLength: 254
+        code:
+          type: string
+          minLength: 6
+          maxLength: 6
+    PortalSession:
+      type: object
+      required: [token, expiresAt]
+      properties:
+        token:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+    PortalMessage:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 2000
+    PortalAddPhotos:
+      type: object
+      required: [photoPaths]
+      properties:
+        photoPaths:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            type: string
+            pattern: "^/objects/.+"
+          description: Object paths of damage photos uploaded via the public upload endpoint.
+    PortalPhotosAttached:
+      type: object
+      required: [attached]
+      properties:
+        attached:
+          type: integer
+          description: Number of photos attached to the claim.
+    PortalMessageSent:
+      type: object
+      required: [sent]
+      properties:
+        sent:
+          type: boolean
+    PortalTimelineStep:
+      type: object
+      required: [key, label, description, state]
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        description:
+          type: string
+        state:
+          type: string
+          enum: [complete, current, upcoming]
+    PortalAppointment:
+      type: object
+      required: [id, type, status, scheduledStart]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        status:
+          type: string
+        scheduledStart:
+          type: string
+          format: date-time
+        scheduledEnd:
+          type:
+            - string
+            - "null"
+          format: date-time
+    PortalUpdate:
+      type: object
+      required: [id, type, title, occurredAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        title:
+          type: string
+        body:
+          type:
+            - string
+            - "null"
+        occurredAt:
+          type: string
+          format: date-time
+    PortalConversationMessage:
+      type: object
+      required: [id, sender, body, occurredAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sender:
+          type: string
+          description: Either `homeowner` or `team`.
+        body:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+    PortalConversation:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          description: All homeowner and team messages on the claim, oldest to newest.
+          items:
+            $ref: "#/components/schemas/PortalConversationMessage"
+    PortalProperty:
+      type: object
+      required: [addressLine1, city, state, postalCode]
+      properties:
+        addressLine1:
+          type: string
+        addressLine2:
+          type:
+            - string
+            - "null"
+        city:
+          type: string
+        state:
+          type: string
+        postalCode:
+          type: string
+    PortalClaim:
+      type: object
+      required:
+        [id, status, closed, urgency, createdAt, updatedAt, steps, appointments, updates, photos]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        closed:
+          type: boolean
+        urgency:
+          type: string
+        serviceType:
+          type:
+            - string
+            - "null"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        property:
+          oneOf:
+            - $ref: "#/components/schemas/PortalProperty"
+            - type: "null"
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalTimelineStep"
+        appointments:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalAppointment"
+        updates:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalUpdate"
+        photos:
+          type: array
+          description: Object paths of the homeowner's own damage photos (e.g. `/objects/uploads/some-uuid`), served via the portal photo endpoint.
+          items:
+            type: string
+    PortalContact:
+      type: object
+      required: [firstName]
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type:
+            - string
+            - "null"
+        email:
+          type:
+            - string
+            - "null"
+        phone:
+          type:
+            - string
+            - "null"
+    PortalOverview:
+      type: object
+      required: [claims]
+      properties:
+        contact:
+          oneOf:
+            - $ref: "#/components/schemas/PortalContact"
+            - type: "null"
+        claims:
+          type: array
+          items:
+            $ref: "#/components/schemas/PortalClaim"
+    AcceptedEnvelope:
+      type: object
+      required: [accepted]
+      properties:
+        accepted:
+          type: boolean
+    UserRole:
+      type: string
+      enum:
+        [
+          owner,
+          admin,
+          sales_manager,
+          sales_rep,
+          inspector,
+          production,
+          office,
+          viewer,
+        ]
+    LeadStatus:
+      type: string
+      enum:
+        [
+          new,
+          ai_qualified,
+          contact_attempted,
+          inspection_scheduled,
+          inspection_completed,
+          estimate_preparing,
+          estimate_sent,
+          claim_pending,
+          follow_up,
+          won,
+          production_scheduled,
+          in_progress,
+          final_walkthrough,
+          completed,
+          review_requested,
+          nurture,
+          lost,
+        ]
+    Urgency:
+      type: string
+      enum: [low, normal, high, emergency]
+    TaskStatus:
+      type: string
+      enum: [open, in_progress, done, cancelled]
+    AppointmentType:
+      type: string
+      enum: [inspection, estimate_review, production, final_walkthrough, other]
+    AppointmentStatus:
+      type: string
+      enum: [scheduled, confirmed, completed, cancelled, no_show]
+    ConsentChannel:
+      type: string
+      enum: [sms, email, phone]
+    Organization:
+      type: object
+      required: [id, name, slug, timezone]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        timezone:
+          type: string
+    Member:
+      type: object
+      required: [id, email, firstName, lastName, role, isActive]
+      properties:
+        id:
+          type: string
+        email:
+          type: [string, "null"]
+        firstName:
+          type: [string, "null"]
+        lastName:
+          type: [string, "null"]
+        role:
+          $ref: "#/components/schemas/UserRole"
+        isActive:
+          type: boolean
+    InvitedMember:
+      type: object
+      required: [id, email, firstName, lastName, role, isActive, inviteEmail]
+      properties:
+        id:
+          type: string
+        email:
+          type: [string, "null"]
+        firstName:
+          type: [string, "null"]
+        lastName:
+          type: [string, "null"]
+        role:
+          $ref: "#/components/schemas/UserRole"
+        isActive:
+          type: boolean
+        inviteEmail:
+          type: object
+          required: [sent, error]
+          properties:
+            sent:
+              type: boolean
+            error:
+              type: [string, "null"]
+    InviteEmailResult:
+      type: object
+      required: [sent, error]
+      properties:
+        sent:
+          type: boolean
+        error:
+          type: [string, "null"]
+    MemberProfile:
+      type: object
+      required: [id, email, firstName, lastName, role, isActive, organization]
+      properties:
+        id:
+          type: string
+        email:
+          type: [string, "null"]
+        firstName:
+          type: [string, "null"]
+        lastName:
+          type: [string, "null"]
+        role:
+          $ref: "#/components/schemas/UserRole"
+        isActive:
+          type: boolean
+        organization:
+          oneOf:
+            - $ref: "#/components/schemas/Organization"
+            - type: "null"
+    Contact:
+      type: object
+      required: [id, organizationId, firstName, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        firstName:
+          type: string
+        lastName:
+          type: [string, "null"]
+        email:
+          type: [string, "null"]
+        phone:
+          type: [string, "null"]
+        preferredContactMethod:
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ContactInput:
+      type: object
+      required: [firstName]
+      properties:
+        firstName:
+          type: string
+          minLength: 1
+        lastName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+        preferredContactMethod:
+          type: string
+    ContactUpdate:
+      type: object
+      properties:
+        firstName:
+          type: string
+          minLength: 1
+        lastName:
+          type: [string, "null"]
+        email:
+          type: [string, "null"]
+        phone:
+          type: [string, "null"]
+        preferredContactMethod:
+          type: [string, "null"]
+    Property:
+      type: object
+      required:
+        [id, organizationId, addressLine1, city, state, postalCode, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        contactId:
+          type: [string, "null"]
+          format: uuid
+        addressLine1:
+          type: string
+        addressLine2:
+          type: [string, "null"]
+        city:
+          type: string
+        state:
+          type: string
+        postalCode:
+          type: string
+        latitude:
+          type: [string, "null"]
+        longitude:
+          type: [string, "null"]
+        propertyType:
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+    PropertyInput:
+      type: object
+      required: [addressLine1, city, state, postalCode]
+      properties:
+        contactId:
+          type: string
+          format: uuid
+        addressLine1:
+          type: string
+          minLength: 1
+        addressLine2:
+          type: string
+        city:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          minLength: 1
+        postalCode:
+          type: string
+          minLength: 1
+        latitude:
+          type: string
+        longitude:
+          type: string
+        propertyType:
+          type: string
+    PropertyUpdate:
+      type: object
+      properties:
+        contactId:
+          type: [string, "null"]
+          format: uuid
+        addressLine1:
+          type: string
+          minLength: 1
+        addressLine2:
+          type: [string, "null"]
+        city:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          minLength: 1
+        postalCode:
+          type: string
+          minLength: 1
+        latitude:
+          type: [string, "null"]
+        longitude:
+          type: [string, "null"]
+        propertyType:
+          type: [string, "null"]
+    Lead:
+      type: object
+      required:
+        [
+          id,
+          organizationId,
+          contactId,
+          status,
+          urgency,
+          score,
+          scoreReasons,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        contactId:
+          type: string
+          format: uuid
+        propertyId:
+          type: [string, "null"]
+          format: uuid
+        assignedUserId:
+          type: [string, "null"]
+        status:
+          $ref: "#/components/schemas/LeadStatus"
+        urgency:
+          $ref: "#/components/schemas/Urgency"
+        serviceType:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+        sourceDetail:
+          type: [string, "null"]
+        contactName:
+          type: [string, "null"]
+          description: Convenience display name of the linked contact (list endpoints only).
+        contactEmail:
+          type: [string, "null"]
+          description: Convenience email of the linked contact (list endpoints only).
+        contactPhone:
+          type: [string, "null"]
+          description: Convenience phone of the linked contact (list endpoints only).
+        score:
+          type: integer
+        scoreReasons:
+          type: array
+          items:
+            type: string
+        summary:
+          type: [string, "null"]
+        estimatedValueCents:
+          type: [integer, "null"]
+        hasUnreadPortalMessage:
+          type: boolean
+          description: True when the homeowner has sent a portal_message more recently than the last team_message reply (list endpoints only).
+        photoCount:
+          type: integer
+          description: Total number of photos attached across all photos_attached activities (list endpoints only).
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    LeadInput:
+      type: object
+      required: [contactId]
+      properties:
+        contactId:
+          type: string
+          format: uuid
+        propertyId:
+          type: string
+          format: uuid
+        assignedUserId:
+          type: string
+        status:
+          $ref: "#/components/schemas/LeadStatus"
+        urgency:
+          $ref: "#/components/schemas/Urgency"
+        serviceType:
+          type: string
+        source:
+          type: string
+        sourceDetail:
+          type: string
+        summary:
+          type: string
+        estimatedValueCents:
+          type: integer
+    LeadUpdate:
+      type: object
+      properties:
+        propertyId:
+          type: [string, "null"]
+          format: uuid
+        assignedUserId:
+          type: [string, "null"]
+        status:
+          $ref: "#/components/schemas/LeadStatus"
+        urgency:
+          $ref: "#/components/schemas/Urgency"
+        serviceType:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+        sourceDetail:
+          type: [string, "null"]
+        summary:
+          type: [string, "null"]
+        estimatedValueCents:
+          type: [integer, "null"]
+    EstimateStatus:
+      type: string
+      enum: [draft, sent, accepted, declined]
+    ProjectStatus:
+      type: string
+      enum: [scheduled, in_progress, on_hold, completed, cancelled]
+    EstimateLineItem:
+      type: object
+      required: [description, quantity, unitPriceCents, totalCents]
+      properties:
+        description:
+          type: string
+        quantity:
+          type: number
+          minimum: 0
+        unitPriceCents:
+          type: integer
+          minimum: 0
+        totalCents:
+          type: integer
+          minimum: 0
+    Estimate:
+      type: object
+      required:
+        [
+          id,
+          organizationId,
+          leadId,
+          title,
+          status,
+          lineItems,
+          subtotalCents,
+          taxCents,
+          totalCents,
+          createdAt,
+          updatedAt,
+        ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        leadId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        status:
+          $ref: "#/components/schemas/EstimateStatus"
+        lineItems:
+          type: array
+          items:
+            $ref: "#/components/schemas/EstimateLineItem"
+        subtotalCents:
+          type: integer
+        taxCents:
+          type: integer
+        totalCents:
+          type: integer
+        leadLabel:
+          type: [string, "null"]
+          description: Convenience display name of the linked lead (contact name, falling back to lead summary; list endpoints only).
+        notes:
+          type: [string, "null"]
+        sentAt:
+          type: [string, "null"]
+          format: date-time
+        acceptedAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    EstimateInput:
+      type: object
+      required: [leadId, title]
+      properties:
+        leadId:
+          type: string
+          format: uuid
+        title:
+          type: string
+          minLength: 1
+        status:
+          $ref: "#/components/schemas/EstimateStatus"
+        lineItems:
+          type: array
+          items:
+            $ref: "#/components/schemas/EstimateLineItem"
+        taxCents:
+          type: integer
+          minimum: 0
+        notes:
+          type: string
+    EstimateUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+        status:
+          $ref: "#/components/schemas/EstimateStatus"
+        lineItems:
+          type: array
+          items:
+            $ref: "#/components/schemas/EstimateLineItem"
+        taxCents:
+          type: integer
+          minimum: 0
+        notes:
+          type: [string, "null"]
+    Project:
+      type: object
+      required:
+        [id, organizationId, leadId, name, status, crewUserIds, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        leadId:
+          type: string
+          format: uuid
+        leadLabel:
+          type: [string, "null"]
+          description: Convenience display name of the linked lead (contact name, falling back to lead summary; list endpoints only).
+        estimateId:
+          type: [string, "null"]
+          format: uuid
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/ProjectStatus"
+        scheduledStart:
+          type: [string, "null"]
+          format: date-time
+        scheduledEnd:
+          type: [string, "null"]
+          format: date-time
+        crewUserIds:
+          type: array
+          items:
+            type: string
+        crewNotes:
+          type: [string, "null"]
+        completedAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ProjectInput:
+      type: object
+      required: [leadId, name]
+      properties:
+        leadId:
+          type: string
+          format: uuid
+        estimateId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+        status:
+          $ref: "#/components/schemas/ProjectStatus"
+        scheduledStart:
+          type: string
+          format: date-time
+        scheduledEnd:
+          type: string
+          format: date-time
+        crewUserIds:
+          type: array
+          items:
+            type: string
+        crewNotes:
+          type: string
+    ProjectUpdate:
+      type: object
+      properties:
+        estimateId:
+          type: [string, "null"]
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+        status:
+          $ref: "#/components/schemas/ProjectStatus"
+        scheduledStart:
+          type: [string, "null"]
+          format: date-time
+        scheduledEnd:
+          type: [string, "null"]
+          format: date-time
+        crewUserIds:
+          type: array
+          items:
+            type: string
+        crewNotes:
+          type: [string, "null"]
+    Activity:
+      type: object
+      required: [id, organizationId, type, title, metadata, occurredAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        leadId:
+          type: [string, "null"]
+          format: uuid
+        contactId:
+          type: [string, "null"]
+          format: uuid
+        actorUserId:
+          type: [string, "null"]
+        type:
+          type: string
+        title:
+          type: string
+        body:
+          type: [string, "null"]
+        metadata:
+          type: object
+          additionalProperties: true
+        occurredAt:
+          type: string
+          format: date-time
+    ActivityInput:
+      type: object
+      required: [type, title]
+      properties:
+        type:
+          type: string
+          minLength: 1
+        title:
+          type: string
+          minLength: 1
+        body:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+    LeadSendEmailInput:
+      type: object
+      required: [subject, body]
+      properties:
+        subject:
+          type: string
+          minLength: 1
+          description: Email subject line (server caps overly long subjects).
+        body:
+          type: string
+          minLength: 1
+          description: Plain-text email body.
+    CrmTask:
+      type: object
+      required: [id, organizationId, title, status, priority, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        leadId:
+          type: [string, "null"]
+          format: uuid
+        leadLabel:
+          type: [string, "null"]
+          description: Convenience display name of the linked lead (contact name, falling back to lead summary; list endpoints only).
+        contactId:
+          type: [string, "null"]
+          format: uuid
+        assignedUserId:
+          type: [string, "null"]
+        title:
+          type: string
+        description:
+          type: [string, "null"]
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        priority:
+          $ref: "#/components/schemas/Urgency"
+        dueAt:
+          type: [string, "null"]
+          format: date-time
+        completedAt:
+          type: [string, "null"]
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+    CrmTaskInput:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        description:
+          type: string
+        leadId:
+          type: string
+          format: uuid
+        contactId:
+          type: string
+          format: uuid
+        assignedUserId:
+          type: string
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        priority:
+          $ref: "#/components/schemas/Urgency"
+        dueAt:
+          type: string
+          format: date-time
+    CrmTaskUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+        description:
+          type: [string, "null"]
+        leadId:
+          type: [string, "null"]
+          format: uuid
+        contactId:
+          type: [string, "null"]
+          format: uuid
+        assignedUserId:
+          type: [string, "null"]
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        priority:
+          $ref: "#/components/schemas/Urgency"
+        dueAt:
+          type: [string, "null"]
+          format: date-time
+    Appointment:
+      type: object
+      required: [id, organizationId, type, status, scheduledStart, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        leadId:
+          type: [string, "null"]
+          format: uuid
+        leadLabel:
+          type: [string, "null"]
+          description: Convenience display name of the linked lead (contact name, falling back to lead summary; list endpoints only).
+        contactId:
+          type: [string, "null"]
+          format: uuid
+        propertyId:
+          type: [string, "null"]
+          format: uuid
+        assignedUserId:
+          type: [string, "null"]
+        type:
+          $ref: "#/components/schemas/AppointmentType"
+        status:
+          $ref: "#/components/schemas/AppointmentStatus"
+        scheduledStart:
+          type: string
+          format: date-time
+        scheduledEnd:
+          type: [string, "null"]
+          format: date-time
+        notes:
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+    AppointmentInput:
+      type: object
+      required: [scheduledStart]
+      properties:
+        leadId:
+          type: string
+          format: uuid
+        contactId:
+          type: string
+          format: uuid
+        propertyId:
+          type: string
+          format: uuid
+        assignedUserId:
+          type: string
+        type:
+          $ref: "#/components/schemas/AppointmentType"
+        status:
+          $ref: "#/components/schemas/AppointmentStatus"
+        scheduledStart:
+          type: string
+          format: date-time
+        scheduledEnd:
+          type: string
+          format: date-time
+        notes:
+          type: string
+    AppointmentUpdate:
+      type: object
+      properties:
+        leadId:
+          type: [string, "null"]
+          format: uuid
+        contactId:
+          type: [string, "null"]
+          format: uuid
+        propertyId:
+          type: [string, "null"]
+          format: uuid
+        assignedUserId:
+          type: [string, "null"]
+        type:
+          $ref: "#/components/schemas/AppointmentType"
+        status:
+          $ref: "#/components/schemas/AppointmentStatus"
+        scheduledStart:
+          type: string
+          format: date-time
+        scheduledEnd:
+          type: [string, "null"]
+          format: date-time
+        notes:
+          type: [string, "null"]
+    DashboardSummary:
+      type: object
+      required:
+        [
+          totalLeads,
+          openTasks,
+          upcomingAppointments,
+          unansweredPortalMessages,
+          leadsByStatus,
+          recentActivities,
+        ]
+      properties:
+        totalLeads:
+          type: integer
+        openTasks:
+          type: integer
+        upcomingAppointments:
+          type: integer
+        unansweredPortalMessages:
+          type: integer
+          description: Leads whose most recent homeowner portal message has no later team activity
+        leadsByStatus:
+          type: array
+          items:
+            type: object
+            required: [status, count]
+            properties:
+              status:
+                $ref: "#/components/schemas/LeadStatus"
+              count:
+                type: integer
+        recentActivities:
+          type: array
+          items:
+            $ref: "#/components/schemas/Activity"
+    AuditEvent:
+      type: object
+      required: [id, organizationId, action, entityType, metadata, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        actorUserId:
+          type: [string, "null"]
+        action:
+          type: string
+        entityType:
+          type: string
+        entityId:
+          type: [string, "null"]
+          format: uuid
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+    AssessmentSubmission:
+      type: object
+      required:
+        [firstName, phone, addressLine1, city, state, postalCode, intent, consent]
+      properties:
+        firstName:
+          type: string
+          minLength: 1
+        lastName:
+          type: string
+        email:
+          type: string
+        phone:
+          type: string
+          minLength: 7
+        addressLine1:
+          type: string
+          minLength: 1
+        addressLine2:
+          type: string
+        city:
+          type: string
+          minLength: 1
+        state:
+          type: string
+          minLength: 2
+        postalCode:
+          type: string
+          minLength: 3
+        intent:
+          type: string
+          enum:
+            [active-leak, storm, replacement, water-damage, emergency, general]
+        urgency:
+          $ref: "#/components/schemas/Urgency"
+        description:
+          type: string
+        source:
+          type: string
+        consent:
+          type: object
+          required: [smsGranted, emailGranted, disclosureVersion]
+          properties:
+            smsGranted:
+              type: boolean
+            emailGranted:
+              type: boolean
+            disclosureVersion:
+              type: string
+              minLength: 1
+        photoPaths:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            pattern: "^/objects/.+"
+          description: Object paths of damage photos uploaded via the public upload endpoint.
+    UploadUrlRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 300
+        size:
+          type: integer
+          minimum: 1
+          maximum: 10485760
+        contentType:
+          type: string
+          enum: [image/jpeg, image/png, image/webp, image/heic, image/heif]
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL:
+          type: string
+        objectPath:
+          type: string
+    AttachLeadPhotosRequest:
+      type: object
+      required: [photoPaths]
+      properties:
+        photoPaths:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items:
+            type: string
+            pattern: "^/objects/.+"
+    DeleteLeadPhotoRequest:
+      type: object
+      required: [objectPath]
+      properties:
+        objectPath:
+          type: string
+          description: The objectPath to remove from the activity's photoPaths array
+          pattern: "^/objects/.+"
+    AssessmentResult:
+      type: object
+      required: [leadId, score, scoreReasons, urgency, guidance]
+      properties:
+        leadId:
+          type: string
+          format: uuid
+        score:
+          type: integer
+        scoreReasons:
+          type: array
+          items:
+            type: string
+        urgency:
+          $ref: "#/components/schemas/Urgency"
+        guidance:
+          type: string
+    ConciergeStartRequest:
+      type: object
+      properties:
+        source:
+          type: string
+        path:
+          type: string
+        intent:
+          type: string
+    ConciergeMessageRequest:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: string
+          minLength: 1
+          maxLength: 2000
+    ConciergeTranscriptionRequest:
+      type: object
+      required: [audioBase64, mimeType]
+      properties:
+        audioBase64:
+          type: string
+          description: Base64-encoded audio clip (size cap enforced server-side).
+        mimeType:
+          type: string
+    ConciergeTranscriptionResponse:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+    ConciergeReply:
+      type: object
+      required: [conversationId, messages, done, emergency, quickReplies]
+      properties:
+        conversationId:
+          type: string
+          format: uuid
+        messages:
+          type: array
+          description: New assistant messages produced by this turn, in order.
+          items:
+            type: string
+        done:
+          type: boolean
+        emergency:
+          type: boolean
+        leadId:
+          type: [string, "null"]
+          format: uuid
+        urgency:
+          $ref: "#/components/schemas/Urgency"
+        quickReplies:
+          type: array
+          items:
+            type: string
+    ConciergeTranscriptMessage:
+      type: object
+      required: [id, role, content, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    ConciergeConversation:
+      type: object
+      required: [id, status, messages, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        leadId:
+          type: [string, "null"]
+          format: uuid
+        status:
+          type: string
+          enum: [active, completed, abandoned]
+        intent:
+          type: [string, "null"]
+        urgency:
+          type: [string, "null"]
+        salesSummary:
+          type: [string, "null"]
+        source:
+          type: [string, "null"]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConciergeTranscriptMessage"
+    AnalyticsEventInput:
+      type: object
+      required: [eventName]
+      properties:
+        eventName:
+          type: string
+          minLength: 1
+        anonymousId:
+          type: string
+        sessionId:
+          type: string
+        path:
+          type: string
+        referrer:
+          type: string
+        properties:
+          type: object
+          additionalProperties: true
+    MarketingLandingPage:
+      type: object
+      required: [path, views, visitors]
+      properties:
+        path:
+          type: string
+        views:
+          type: integer
+        visitors:
+          type: integer
+    MarketingReferrer:
+      type: object
+      required: [referrer, category, views]
+      properties:
+        referrer:
+          type: string
+          description: Referrer host, or "direct" when none.
+        category:
+          type: string
+          enum: [ai, search, social, direct, other]
+        views:
+          type: integer
+    MarketingSummary:
+      type: object
+      required: [days, totalPageViews, uniqueVisitors, aiReferralViews, landingPages, referrers]
+      properties:
+        days:
+          type: integer
+        totalPageViews:
+          type: integer
+        uniqueVisitors:
+          type: integer
+        aiReferralViews:
+          type: integer
+          description: Page views referred by AI answer engines (chatgpt.com, perplexity.ai, etc).
+        landingPages:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketingLandingPage"
+        referrers:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketingReferrer"
+    StormCheckRequest:
+      type: object
+      required: [address]
+      properties:
+        address:
+          type: string
+          minLength: 5
+          maxLength: 300
+    StormEvent:
+      type: object
+      required: [type, severity, magnitude, distanceMiles, date]
+      properties:
+        type:
+          type: string
+          enum: [hail, wind]
+        severity:
+          type: string
+          enum: [minor, moderate, severe]
+        magnitude:
+          type: string
+        distanceMiles:
+          type: number
+        date:
+          type: string
+    StormCheckResult:
+      type: object
+      required: [address, events, isDemoData, suggestedNextAction]
+      properties:
+        address:
+          type: string
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/StormEvent"
+        isDemoData:
+          type: boolean
+          description: True when results are demonstration data, not a live weather feed.
+        suggestedNextAction:
+          type: string
+          enum: [schedule_inspection, monitor]
+    EmailProviderStatus:
+      type: object
+      required: [provider]
+      properties:
+        provider:
+          type: string
+          enum: [gmail, resend, mock]
+        senderEmail:
+          type: string
+          nullable: true
+          description: Account/address automation emails are sent from (Gmail account for gmail, from-address for resend).
+        recentSendFailures:
+          type: integer
+          description: Number of consecutive failed send_email automation results, newest first, until the last successful send. 0 when the latest send succeeded or no sends were attempted.
+        lastSendFailureAt:
+          type: string
+          nullable: true
+          description: When the most recent failed send_email attempt happened (ISO timestamp), if any.
+        lastSendFailureDetail:
+          type: string
+          nullable: true
+          description: Error detail recorded for the most recent failed send_email attempt, if any.
+    SmsProviderStatus:
+      type: object
+      required: [provider]
+      properties:
+        provider:
+          type: string
+          enum: [twilio, mock]
+        senderPhoneNumber:
+          type: string
+          nullable: true
+          description: Phone number texts are sent from (Twilio number when provider is twilio, null for mock).
+    OrgSettings:
+      type: object
+      required: [id, organizationId, businessProfile, services, serviceAreas]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        businessProfile:
+          $ref: "#/components/schemas/BusinessProfile"
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceEntry"
+        serviceAreas:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceAreaEntry"
+        leadScoring:
+          oneOf:
+            - $ref: "#/components/schemas/LeadScoringSettings"
+            - type: "null"
+        inspectionAvailability:
+          oneOf:
+            - $ref: "#/components/schemas/InspectionAvailabilitySettings"
+            - type: "null"
+        appointmentReminder:
+          oneOf:
+            - $ref: "#/components/schemas/AppointmentReminderSettings"
+            - type: "null"
+        aiInstructions:
+          type: [string, "null"]
+          description: Extra org-specific instructions appended to AI prompts.
+        securityAlertsAcknowledgedAt:
+          type: [string, "null"]
+          description: ISO timestamp; brute-force security alerts recorded at or before this instant are dismissed.
+        fallbackNotificationInbox:
+          type: [string, "null"]
+          description: Fallback email address for portal message notifications when the assigned rep has no valid email.
+        googleReviews:
+          oneOf:
+            - $ref: "#/components/schemas/GoogleReviewsConfig"
+            - type: "null"
+        updatedAt:
+          type: string
+    OrgSettingsInput:
+      type: object
+      properties:
+        businessProfile:
+          $ref: "#/components/schemas/BusinessProfile"
+        services:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceEntry"
+        serviceAreas:
+          type: array
+          items:
+            $ref: "#/components/schemas/ServiceAreaEntry"
+        leadScoring:
+          $ref: "#/components/schemas/LeadScoringSettings"
+        inspectionAvailability:
+          $ref: "#/components/schemas/InspectionAvailabilitySettings"
+        appointmentReminder:
+          $ref: "#/components/schemas/AppointmentReminderSettings"
+        aiInstructions:
+          type: string
+          maxLength: 4000
+        securityAlertsAcknowledgedAt:
+          type: string
+          description: ISO timestamp; acknowledges (dismisses) brute-force security alerts recorded at or before this instant.
+        fallbackNotificationInbox:
+          type: string
+          nullable: true
+          description: Fallback email address for portal message notifications when the assigned rep has no valid email.
+        googleReviews:
+          $ref: "#/components/schemas/GoogleReviewsConfig"
+    GoogleReviewsConfig:
+      type: object
+      description: Google Business Profile connection for the public reviews widget.
+      properties:
+        placeId:
+          type: string
+          description: Google Place ID for the business listing (e.g. ChIJ...).
+        apiKey:
+          type: string
+          description: Google Places API key with Places Details access.
+    InspectionWindow:
+      type: object
+      required: [startHour, endHour]
+      properties:
+        startHour:
+          type: integer
+          description: Local start hour, 0-23. Out-of-range values are sanitized server-side.
+        endHour:
+          type: integer
+          description: Local end hour, 1-24 (must be greater than startHour). Sanitized server-side.
+    InspectionAvailabilitySettings:
+      type: object
+      required: [timezone, days, windows, maxBookingsPerWindow, blackoutDates]
+      properties:
+        timezone:
+          type: string
+          description: IANA timezone the windows are expressed in.
+        days:
+          type: array
+          items:
+            type: string
+            enum: [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
+        windows:
+          type: array
+          items:
+            $ref: "#/components/schemas/InspectionWindow"
+        maxBookingsPerWindow:
+          type: integer
+          description: Minimum 1; invalid values are sanitized server-side.
+        blackoutDates:
+          type: array
+          items:
+            type: string
+            description: YYYY-MM-DD dates; invalid entries are ignored server-side.
+    AppointmentReminderSettings:
+      type: object
+      required: [leadTimeHours, smsBody, emailSubject, emailBody]
+      properties:
+        leadTimeHours:
+          type: number
+          description: Hours before the inspection window to send the reminder (1-336; invalid values are sanitized server-side).
+        smsBody:
+          type: string
+          description: SMS template. Supports {{contact.firstName}}, {{business.name}}, {{business.phone}}, {{appointment.window}}, {{reschedule.line}}.
+        emailSubject:
+          type: string
+          description: Email subject template (same placeholders as smsBody).
+        emailBody:
+          type: string
+          description: Email body template (same placeholders as smsBody).
+    LeadScoringSettings:
+      type: object
+      required:
+        [
+          intentPoints,
+          emergencyUrgencyBonus,
+          highUrgencyBonus,
+          emailProvidedBonus,
+          smsConsentBonus,
+          detailedDescriptionBonus,
+          completeAddressBonus,
+          contactMethodBonus,
+        ]
+      properties:
+        intentPoints:
+          type: object
+          additionalProperties:
+            type: number
+        emergencyUrgencyBonus:
+          type: number
+        highUrgencyBonus:
+          type: number
+        emailProvidedBonus:
+          type: number
+        smsConsentBonus:
+          type: number
+        detailedDescriptionBonus:
+          type: number
+        completeAddressBonus:
+          type: number
+        contactMethodBonus:
+          type: number
+    InviteUserInput:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          $ref: "#/components/schemas/UserRole"
+        firstName:
+          type: string
+        lastName:
+          type: string
+    UpdateUserInput:
+      type: object
+      properties:
+        role:
+          $ref: "#/components/schemas/UserRole"
+        isActive:
+          type: boolean
+    ApiKey:
+      type: object
+      required: [id, name, prefix, role, isActive, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        prefix:
+          type: string
+        role:
+          $ref: "#/components/schemas/UserRole"
+        isActive:
+          type: boolean
+        lastUsedAt:
+          type: [string, "null"]
+        expiresAt:
+          type: [string, "null"]
+        createdAt:
+          type: string
+    ApiKeyCreated:
+      allOf:
+        - $ref: "#/components/schemas/ApiKey"
+        - type: object
+          required: [key]
+          properties:
+            key:
+              type: string
+              description: Full secret — shown only once at creation.
+    CreateApiKeyInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        role:
+          $ref: "#/components/schemas/UserRole"
+          description: Access level the key is capped at (defaults to office).
+        expiresAt:
+          type: string
+          description: Optional ISO date-time after which the key stops working.
+    UpdateApiKeyInput:
+      type: object
+      description: At least one of name or expiresAt must be provided.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: New display name for the key.
+        expiresAt:
+          type: [string, "null"]
+          description: New ISO date-time after which the key stops working (must be in the future), or null to remove the expiration.
+    BusinessProfile:
+      type: object
+      properties:
+        businessName:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        addressLine1:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        postalCode:
+          type: string
+        hours:
+          type: string
+        emergencyAvailability:
+          type: boolean
+        website:
+          type: string
+        facebookUrl:
+          type: string
+        googleBusinessUrl:
+          type: string
+    ServiceEntry:
+      type: object
+      required: [slug, name, isActive]
+      properties:
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        isActive:
+          type: boolean
+    GoogleReview:
+      type: object
+      required: [reviewerName, rating, relativeDate, text]
+      properties:
+        reviewerName:
+          type: string
+          description: "First name + last initial, e.g. 'John D.'"
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        relativeDate:
+          type: string
+          description: "Relative date string from the Places API, e.g. '3 months ago'"
+        text:
+          type: string
+        profilePhotoUrl:
+          type: string
+          nullable: true
+    GoogleReviewsResponse:
+      type: object
+      required: [reviews, isFallback]
+      properties:
+        reviews:
+          type: array
+          items:
+            $ref: "#/components/schemas/GoogleReview"
+        isFallback:
+          type: boolean
+          description: True when the live Google API was unavailable and reviews list is empty.
+    PublicSiteConfig:
+      type: object
+      required: [businessProfile, services, serviceAreas]
+      properties:
+        businessProfile:
+          $ref: "#/components/schemas/BusinessProfile"
+        services:
+          type: array
+          description: Active services only.
+          items:
+            $ref: "#/components/schemas/ServiceEntry"
+        serviceAreas:
+          type: array
+          description: Active service areas only.
+          items:
+            $ref: "#/components/schemas/ServiceAreaEntry"
+    ServiceAreaEntry:
+      type: object
+      required: [slug, name, isActive]
+      properties:
+        slug:
+          type: string
+        name:
+          type: string
+        state:
+          type: string
+        isActive:
+          type: boolean
+    MessageChannel:
+      type: string
+      enum: [email, sms]
+    MessageTemplate:
+      type: object
+      required: [id, name, channel, body, isActive]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        channel:
+          $ref: "#/components/schemas/MessageChannel"
+        subject:
+          type: string
+          nullable: true
+        body:
+          type: string
+        isActive:
+          type: boolean
+        updatedAt:
+          type: string
+    MessageTemplateInput:
+      type: object
+      required: [name, channel, body]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        channel:
+          $ref: "#/components/schemas/MessageChannel"
+        subject:
+          type: string
+        body:
+          type: string
+          minLength: 1
+    MessageTemplateUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        channel:
+          $ref: "#/components/schemas/MessageChannel"
+        subject:
+          type: string
+        body:
+          type: string
+          minLength: 1
+        isActive:
+          type: boolean
+    AutomationActionConfig:
+      type: object
+      required: [type, params]
+      properties:
+        type:
+          type: string
+          enum:
+            - send_email
+            - send_sms
+            - create_task
+            - assign_lead
+            - change_stage
+            - call_webhook
+            - add_tag
+            - schedule_followup
+        params:
+          type: object
+          additionalProperties: true
+    Automation:
+      type: object
+      required: [id, name, event, conditions, actions, isActive]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        event:
+          type: string
+        conditions:
+          type: object
+          additionalProperties: true
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationActionConfig"
+        isActive:
+          type: boolean
+        updatedAt:
+          type: string
+    AutomationInput:
+      type: object
+      required: [name, event]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        event:
+          type: string
+          minLength: 1
+        conditions:
+          type: object
+          additionalProperties: true
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationActionConfig"
+        isActive:
+          type: boolean
+    AutomationUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        event:
+          type: string
+          minLength: 1
+        conditions:
+          type: object
+          additionalProperties: true
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationActionConfig"
+        isActive:
+          type: boolean
+    AutomationActionResult:
+      type: object
+      required: [type, status]
+      properties:
+        type:
+          type: string
+        status:
+          type: string
+          enum: [success, failed, skipped]
+        detail:
+          type: string
+    AutomationRun:
+      type: object
+      required: [id, automationId, event, status, actionResults, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        automationId:
+          type: string
+          format: uuid
+        event:
+          type: string
+        entityType:
+          type: string
+          nullable: true
+        entityId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [success, partial, failed, skipped]
+        actionResults:
+          type: array
+          items:
+            $ref: "#/components/schemas/AutomationActionResult"
+        error:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+    WebhookEndpoint:
+      type: object
+      required: [id, url, events, isActive]
+      properties:
+        id:
+          type: string
+          format: uuid
+        url:
+          type: string
+        events:
+          type: array
+          items:
+            type: string
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+        previousSecretExpiresAt:
+          type: string
+          nullable: true
+          description: >-
+            When a secret rotation grace window is active, the ISO timestamp
+            after which the old secret stops being honored. Null when no
+            rotation is in flight. The old secret itself is never returned.
+    WebhookEndpointWithSecret:
+      allOf:
+        - $ref: "#/components/schemas/WebhookEndpoint"
+        - type: object
+          required: [secret]
+          properties:
+            secret:
+              type: string
+              description: >-
+                HMAC-SHA256 signing secret. Shown only once at creation and
+                stored encrypted. Deliveries carry an
+                `X-Painless-Signature` header of the form
+                `t=<unix_seconds>,v1=<hex hmac>` where the HMAC-SHA256 is
+                computed over `"<t>.<raw request body>"` using this secret.
+                Receivers should recompute the HMAC, compare in constant
+                time, and reject timestamps older than ~5 minutes.
+    WebhookEndpointInput:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+    RotateWebhookSecretInput:
+      type: object
+      properties:
+        gracePeriodHours:
+          type: integer
+          minimum: 0
+          description: >-
+            Hours the old secret keeps being honored alongside the new one
+            (deliveries carry both signatures). 0 revokes it immediately.
+            Defaults to 24; capped at 168 (7 days).
+    WebhookEndpointUpdate:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+        isActive:
+          type: boolean
+    WebhookDelivery:
+      type: object
+      required: [id, endpointId, event, status, attempts, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        endpointId:
+          type: string
+          format: uuid
+        event:
+          type: string
+        status:
+          type: string
+          enum: [pending, success, failed]
+        attempts:
+          type: integer
+        signatureVersion:
+          type: string
+          description: Signing scheme version used for this delivery (e.g. "v1").
+        responseStatus:
+          type: integer
+          nullable: true
+        lastError:
+          type: string
+          nullable: true
+        deliveredAt:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+    BulkLeadActionRequest:
+      type: object
+      required: [leadIds, action]
+      properties:
+        leadIds:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: string
+            format: uuid
+        action:
+          type: object
+          description: Exactly one of status, assignedUserId, or tagId should be provided.
+          properties:
+            status:
+              $ref: "#/components/schemas/LeadStatus"
+            assignedUserId:
+              type: [string, "null"]
+            tagId:
+              type: string
+              format: uuid
+    BulkLeadActionResult:
+      type: object
+      required: [updated, skipped]
+      properties:
+        updated:
+          type: integer
+        skipped:
+          type: integer
+    DuplicateLeadGroup:
+      type: object
+      required: [field, value, leadIds]
+      properties:
+        field:
+          type: string
+          enum: [phone, email, address]
+        value:
+          type: string
+        leadIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+    MergeLeadRequest:
+      type: object
+      required: [sourceLeadId]
+      properties:
+        sourceLeadId:
+          type: string
+          format: uuid
+          description: The duplicate lead whose activities and tags move onto this lead before it is marked lost.
+    SavedFilter:
+      type: object
+      required: [id, name, filters, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        filters:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+    SavedFilterInput:
+      type: object
+      required: [name, filters]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        filters:
+          type: object
+          additionalProperties: true
+    Tag:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        color:
+          type: string
+          nullable: true
+    TagInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        color:
+          type: string
+    AssistantHistoryTurn:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        toolsRun:
+          type: array
+          items:
+            type: string
+    AssistantHistory:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssistantHistoryTurn"
+    AssistantHistorySaveInput:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          maxItems: 40
+          items:
+            $ref: "#/components/schemas/AssistantHistoryTurn"
+    AssistantChatInput:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          minItems: 1
+          maxItems: 40
+          items:
+            $ref: "#/components/schemas/AssistantChatTurn"
+    AssistantChatTurn:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+          minLength: 1
+          maxLength: 4000
