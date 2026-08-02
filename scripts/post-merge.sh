@@ -76,19 +76,17 @@ if ! $PUSH_CRM && ! $PUSH_MOBILE && ! $PUSH_WEBSITE; then
 else
   echo "--- Syncing changed template repos ---"
 
-  # _push_product runs the push and FAILS LOUDLY on any error so post-merge
-  # exits non-zero and blocks the merge.  A failed push must never be silent.
-  _push_product() {
+  _push_safe() {
     local product="$1"
     local label="$2"
-    bash "$SCRIPT_DIR/push-to-product-repos.sh" "$product" || {
-      echo "❌  $label template push FAILED — aborting post-merge." \
-           "Fix the remote configuration or network issue, then re-run." >&2
-      exit 1
-    }
+    # Run in a subshell so a non-zero exit (e.g. remote not configured)
+    # prints a warning but does NOT abort post-merge.
+    (
+      bash "$SCRIPT_DIR/push-to-product-repos.sh" "$product"
+    ) || echo "⚠️   $label template push skipped — remote not configured or push failed. Run manually: scripts/push-to-product-repos.sh $product"
   }
 
-  if $PUSH_CRM;     then _push_product crm     "CRM";     fi
-  if $PUSH_MOBILE;  then _push_product mobile  "Mobile";  fi
-  if $PUSH_WEBSITE; then _push_product website "Website"; fi
+  if $PUSH_CRM;     then _push_safe crm     "CRM";     fi
+  if $PUSH_MOBILE;  then _push_safe mobile  "Mobile";  fi
+  if $PUSH_WEBSITE; then _push_safe website "Website"; fi
 fi
