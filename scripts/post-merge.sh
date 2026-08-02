@@ -30,9 +30,36 @@ _changed_in() {
   [ -n "$CHANGED_FILES" ] && echo "$CHANGED_FILES" | grep -q "^${1}"
 }
 
-# Shared dirs: a change here affects every template repo
+# Paths excluded from the "shared changed" check.
+# Files that match any of these patterns are ignored when deciding whether a
+# shared-dir edit should trigger a push to all three template repos.  Add to
+# this list for doc-only or maintenance files that carry no runtime impact:
+#
+#   scripts/post-merge.sh  — edits to this script are meta / infra, not product
+#   *.md                   — documentation changes never affect runtime behaviour
+SHARED_EXCLUDE_PATTERNS=(
+  "^scripts/post-merge\.sh$"
+  "\.md$"
+)
+
+# Build a filtered view of the changed-file list for the shared-dir check.
+_shared_changed_files() {
+  local files="$CHANGED_FILES"
+  for pat in "${SHARED_EXCLUDE_PATTERNS[@]}"; do
+    files="$(echo "$files" | grep -v "$pat" || true)"
+  done
+  echo "$files"
+}
+SHARED_CHANGED_FILES="$(_shared_changed_files)"
+
+_shared_changed_in() {
+  [ -n "$SHARED_CHANGED_FILES" ] && echo "$SHARED_CHANGED_FILES" | grep -q "^${1}"
+}
+
+# Shared dirs: a change here affects every template repo.
+# Note: uses the filtered file list so excluded paths (above) never trigger a push.
 SHARED_CHANGED=false
-if _changed_in "artifacts/api-server/" || _changed_in "lib/" || _changed_in "scripts/"; then
+if _shared_changed_in "artifacts/api-server/" || _shared_changed_in "lib/" || _shared_changed_in "scripts/"; then
   SHARED_CHANGED=true
 fi
 
@@ -59,7 +86,7 @@ else
     ) || echo "⚠️   $label template push skipped — remote not configured or push failed. Run manually: scripts/push-to-product-repos.sh $product"
   }
 
-  $PUSH_CRM     && _push_safe crm     "CRM"
-  $PUSH_MOBILE  && _push_safe mobile  "Mobile"
-  $PUSH_WEBSITE && _push_safe website "Website"
+  if $PUSH_CRM;     then _push_safe crm     "CRM";     fi
+  if $PUSH_MOBILE;  then _push_safe mobile  "Mobile";  fi
+  if $PUSH_WEBSITE; then _push_safe website "Website"; fi
 fi

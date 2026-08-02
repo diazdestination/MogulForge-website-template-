@@ -24,7 +24,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+# Allow tests to override ROOT_DIR so require_remote() inspects a temp repo
+# instead of the live workspace.  Production callers never set this variable.
+ROOT_DIR="${PUSH_ROOT_DIR:-$(dirname "$SCRIPT_DIR")}"
 
 # ---------------------------------------------------------------------------
 # Helpers
