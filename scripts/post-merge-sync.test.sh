@@ -2,17 +2,20 @@
 # =============================================================================
 # post-merge-sync.test.sh
 #
-# Verifies that the template-repo sync block in scripts/post-merge.sh is
-# non-fatal:
+# Verifies the end-to-end behaviour of the template-repo sync block in
+# scripts/post-merge.sh:
+#
 #   1. push-to-product-repos.sh exits non-zero (loudly) when a remote is
-#      absent — this is the expected failure mode.
-#   2. The _push_safe() wrapper used in post-merge.sh catches that failure and
-#      exits 0 with a warning message, so post-merge never aborts.
-#   3. When ORIG_HEAD is missing (e.g. CI squash-merge) the detection logic
+#      absent — the expected failure mode.
+#   2. A push failure propagates: the _push_product() wrapper used in
+#      post-merge.sh exits non-zero and prints a clear ❌ error message,
+#      so the merge is blocked when a push fails.
+#   3. When ORIG_HEAD is missing (CI squash-merge) the changed-file detection
 #      falls back to HEAD~1 and still exits 0.
-#   4. When both ORIG_HEAD and HEAD~1 are missing (very first commit / shallow
-#      clone with depth 1) the "|| true" tail of the expression exits 0 and
-#      the sync block is simply skipped.
+#   4. When both ORIG_HEAD and HEAD~1 are missing (first / shallow commit)
+#      the "|| true" tail exits 0 and the sync block is skipped cleanly.
+#   5. When no product directories changed the sync block is skipped and the
+#      script still exits 0 — a no-op merge does not trigger push attempts.
 # =============================================================================
 set -euo pipefail
 
@@ -74,38 +77,44 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 2: _push_safe wrapper (as used in post-merge.sh) exits 0 despite the
-#         push failure, and prints the ⚠️ warning line
+# Test 2: push failure is FATAL — _push_product (as used in post-merge.sh)
+#         exits non-zero and prints the ❌ error line when the push fails.
+#         The merge must be blocked, not silently skipped.
 # ---------------------------------------------------------------------------
 echo ""
-echo "Test 2: _push_safe wrapper exits 0 and warns when push-to-product-repos.sh fails"
+echo "Test 2: push failure propagates — _push_product exits non-zero and prints ❌ error"
 
 REPO2="$TMPROOT/repo2"
 make_repo "$REPO2"
 OUT2="$TMPROOT/out2.txt"
 
+EXIT2=0
 (
   cd "$REPO2"
-  # Replicate the _push_safe logic verbatim from post-merge.sh.
+  # Replicate the _push_product logic verbatim from post-merge.sh.
   # PUSH_ROOT_DIR makes require_remote() check this temp repo (no remotes).
-  _push_safe() {
+  _push_product() {
     local product="$1"
     local label="$2"
-    (
-      PUSH_ROOT_DIR="$REPO2" bash "$SCRIPT_DIR/push-to-product-repos.sh" "$product"
-    ) || echo "⚠️   $label template push skipped — remote not configured or push failed. Run manually: scripts/push-to-product-repos.sh $product"
+    PUSH_ROOT_DIR="$REPO2" bash "$SCRIPT_DIR/push-to-product-repos.sh" "$product" || {
+      echo "❌  $label template push FAILED — aborting post-merge." \
+           "Fix the remote configuration or network issue, then re-run." >&2
+      exit 1
+    }
   }
-  _push_safe crm "CRM"
-) >"$OUT2" 2>&1
-EXIT2=$?
+  _push_product crm "CRM"
+) >"$OUT2" 2>&1 || EXIT2=$?
 
-if [ "$EXIT2" -ne 0 ]; then
-  _fail "_push_safe wrapper exited $EXIT2, expected 0"
+if [ "$EXIT2" -eq 0 ]; then
+  _fail "_push_product exited 0 when remote absent — push failure should be fatal"
+  echo "    --- captured output ---"
+  cat "$OUT2"
+  echo "    -----------------------"
 else
-  if grep -q "⚠️" "$OUT2"; then
-    _pass "_push_safe exits 0 and emits ⚠️  warning when remote is absent"
+  if grep -q "❌" "$OUT2"; then
+    _pass "_push_product exits non-zero and prints ❌ error when push fails"
   else
-    _fail "_push_safe exited 0 but warning line was not printed"
+    _fail "_push_product exited non-zero but ❌ error message was not printed"
     echo "    --- captured output ---"
     cat "$OUT2"
     echo "    -----------------------"
@@ -201,6 +210,86 @@ else
     _fail "Unexpected output from first-commit test"
     echo "    --- captured output ---"
     cat "$OUT4"
+    echo "    -----------------------"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Test 5: No product dirs changed — sync block skipped, exits 0
+#         Ensures a commit that only touches non-product files (e.g. a
+#         docs-only change) never attempts a push.
+# ---------------------------------------------------------------------------
+echo ""
+echo "Test 5: No product dirs changed — template sync skipped, exits 0"
+
+REPO5="$TMPROOT/repo5"
+git init -q "$REPO5"
+git -C "$REPO5" config user.email "test@ci"
+git -C "$REPO5" config user.name  "CI Test"
+
+# Commit 1: a non-product file
+mkdir -p "$REPO5/docs"
+echo "v1" > "$REPO5/docs/readme.md"
+git -C "$REPO5" add -A
+git -C "$REPO5" commit -q -m "docs only"
+
+# Commit 2: another non-product file
+echo "v2" > "$REPO5/docs/readme.md"
+git -C "$REPO5" add -A
+git -C "$REPO5" commit -q -m "docs update"
+
+OUT5="$TMPROOT/out5.txt"
+
+(
+  cd "$REPO5"
+  CHANGED_FILES="$(git diff --name-only ORIG_HEAD HEAD 2>/dev/null \
+    || git diff --name-only HEAD~1 HEAD 2>/dev/null \
+    || true)"
+
+  _changed_in() {
+    [ -n "$CHANGED_FILES" ] && echo "$CHANGED_FILES" | grep -q "^${1}"
+  }
+
+  SHARED_CHANGED_FILES="$CHANGED_FILES"
+  _shared_changed_in() {
+    [ -n "$SHARED_CHANGED_FILES" ] && echo "$SHARED_CHANGED_FILES" | grep -q "^${1}"
+  }
+
+  SHARED_CHANGED=false
+  if _shared_changed_in "artifacts/api-server/" || _shared_changed_in "lib/" || _shared_changed_in "scripts/"; then
+    SHARED_CHANGED=true
+  fi
+
+  PUSH_CRM=false
+  PUSH_MOBILE=false
+  PUSH_WEBSITE=false
+
+  if $SHARED_CHANGED || _changed_in "artifacts/command-center/"; then PUSH_CRM=true; fi
+  if $SHARED_CHANGED || _changed_in "artifacts/mobile-crm/";     then PUSH_MOBILE=true; fi
+  if $SHARED_CHANGED || _changed_in "artifacts/website/";        then PUSH_WEBSITE=true; fi
+
+  if ! $PUSH_CRM && ! $PUSH_MOBILE && ! $PUSH_WEBSITE; then
+    echo "No product directories changed — template sync skipped."
+  else
+    # Should not reach here for a docs-only commit
+    echo "sync-attempted-unexpectedly"
+    exit 1
+  fi
+) >"$OUT5" 2>&1
+EXIT5=$?
+
+if [ "$EXIT5" -ne 0 ]; then
+  _fail "Docs-only commit triggered unexpected push or crashed (exit $EXIT5)"
+  echo "    --- captured output ---"
+  cat "$OUT5"
+  echo "    -----------------------"
+else
+  if grep -q "template sync skipped" "$OUT5"; then
+    _pass "Docs-only commit: sync skipped cleanly, exits 0"
+  else
+    _fail "Docs-only commit: unexpected output"
+    echo "    --- captured output ---"
+    cat "$OUT5"
     echo "    -----------------------"
   fi
 fi
