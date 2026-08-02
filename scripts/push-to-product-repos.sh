@@ -211,15 +211,6 @@ YAML
 
   info "Bundled .github/workflows/sync-from-upstream.yml into $product template"
 
-  # Also write the workflow to a staging path that the Replit connector CAN push
-  # (GitHub's Trees API rejects .github/workflows/ without `workflow` scope, but
-  # accepts any other path under .github/).  Template users activate it by running
-  # scripts/install-sync-workflow.sh from a local clone — a plain `git push` does
-  # NOT require `workflow` scope.
-  cp "$tmpdir/.github/workflows/sync-from-upstream.yml" \
-     "$tmpdir/.github/sync-from-upstream.workflow.yml"
-  info "Staged workflow at .github/sync-from-upstream.workflow.yml (activation: scripts/install-sync-workflow.sh)"
-
   # Push via GitHub API (uses Replit OAuth connection — no PAT needed)
   local commit_msg="chore: sync from monorepo [$(date -u +%Y-%m-%dT%H:%M:%SZ)]"
   local gh_owner gh_repo
@@ -230,19 +221,6 @@ YAML
 
   ok "'$product' pushed to $remote_url"
   _cleanup_tmpdir
-
-  # Push the GitHub Actions workflow file separately.
-  # The Replit connector only has 'repo' scope; GitHub rejects writes to
-  # .github/workflows/ without 'workflow' scope.  A dedicated PAT stored as
-  # GITHUB_WORKFLOW_PAT handles this single path.
-  if [[ -n "${GITHUB_WORKFLOW_PAT:-}" ]]; then
-    info "Pushing .github/workflows/sync-from-upstream.yml to ${gh_owner}/${gh_repo} …"
-    GITHUB_WORKFLOW_PAT="$GITHUB_WORKFLOW_PAT" \
-      node "$SCRIPT_DIR/push-workflow-files.mjs" "$product"
-  else
-    echo "⚠️   GITHUB_WORKFLOW_PAT not set — skipping .github/workflows/sync-from-upstream.yml" >&2
-    echo "    Run: GITHUB_WORKFLOW_PAT=<token> node scripts/push-workflow-files.mjs $product" >&2
-  fi
 }
 
 # ---------------------------------------------------------------------------
