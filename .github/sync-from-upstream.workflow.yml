@@ -1,0 +1,68 @@
+# Sync this template repo with the latest upstream Painless CRM monorepo.
+#
+# How to use
+# ----------
+# 1. Add a secret named MONOREPO_URL to this repository's Settings → Secrets
+#    that contains the HTTPS clone URL of your upstream Painless CRM monorepo
+#    (e.g. https://<token>@github.com/YOUR_ORG/painless-crm.git).
+# 2. Go to Actions → "Sync from upstream monorepo" → Run workflow.
+#
+# The workflow clones the monorepo, runs the export script for this product,
+# and force-pushes the result back to this repository's main branch — exactly
+# as if you had run  scripts/push-to-product-repos.sh website  locally.
+name: Sync from upstream monorepo
+
+on:
+  workflow_dispatch:
+    inputs:
+      monorepo_url:
+        description: >
+          HTTPS clone URL of the upstream Painless CRM monorepo.
+          Leave blank to use the MONOREPO_URL repository secret.
+        required: false
+        type: string
+
+jobs:
+  sync:
+    name: Export & push website template
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve upstream URL
+        id: upstream
+        run: |
+          URL="${{ inputs.monorepo_url }}"
+          if [ -z "$URL" ]; then
+            URL="${{ secrets.MONOREPO_URL }}"
+          fi
+          if [ -z "$URL" ]; then
+            echo "Error: provide monorepo_url input or set the MONOREPO_URL secret." >&2
+            exit 1
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Clone upstream monorepo
+        run: git clone --depth 1 "${{ steps.upstream.outputs.url }}" monorepo
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Point remote at this repository
+        run: |
+          cd monorepo
+          # Add (or update) the remote that push-to-product-repos.sh uses for
+          # this product, pointing it at the current template repo.
+          git remote remove website-template 2>/dev/null || true
+          git remote add website-template \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "template-sync@painless-crm"
+          git config --global user.name "Template Sync"
+
+      - name: Run export and push
+        run: |
+          cd monorepo
+          bash scripts/push-to-product-repos.sh website

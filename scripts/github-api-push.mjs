@@ -40,7 +40,6 @@
  */
 
 import { ReplitConnectors } from "@replit/connectors-sdk";
-import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
@@ -164,56 +163,6 @@ async function ghApi(method, path, body, retries = 5, allowMissing = false) {
 }
 
 // ---------------------------------------------------------------------------
-// Git blob SHA — same formula GitHub uses to store a blob
-// ---------------------------------------------------------------------------
-function gitBlobSha(content /* Buffer */) {
-  const hash = createHash("sha1");
-  hash.update(`blob ${content.length}\0`);
-  hash.update(content);
-  return hash.digest("hex");
-}
-
-// ---------------------------------------------------------------------------
-// Fetch remote tree for main (path → sha map) so unchanged files can be
-// reused without a round-trip to create a new blob.
-// Returns an empty Map when the branch doesn't exist yet.
-// ---------------------------------------------------------------------------
-async function fetchCurrentTree() {
-  const refData = await ghApi(
-    "GET",
-    `/repos/${owner}/${repo}/git/ref/heads/main`,
-    undefined,
-    5,
-    true,
-  );
-  if (!refData || refData._status) return new Map();
-
-  const commitData = await ghApi(
-    "GET",
-    `/repos/${owner}/${repo}/git/commits/${refData.object.sha}`,
-    undefined,
-    5,
-    true,
-  );
-  if (!commitData || commitData._status) return new Map();
-
-  const treeData = await ghApi(
-    "GET",
-    `/repos/${owner}/${repo}/git/trees/${commitData.tree.sha}?recursive=1`,
-    undefined,
-    5,
-    true,
-  );
-  if (!treeData || treeData._status || !treeData.tree) return new Map();
-
-  const map = new Map();
-  for (const entry of treeData.tree) {
-    if (entry.type === "blob") map.set(entry.path, entry.sha);
-  }
-  return map;
-}
-
-// ---------------------------------------------------------------------------
 // Paths excluded from the push
 // ---------------------------------------------------------------------------
 // The Replit GitHub connector has `repo` scope but NOT `workflow` scope.
@@ -304,8 +253,7 @@ async function ensureRepo() {
   // 1. Ensure repo exists and is initialised
   await ensureRepo();
 
-  // 2. Resolve current HEAD and fetch the existing remote tree so we can
-  //    skip blob creation for files that haven't changed.
+  // 2. Resolve current HEAD.
   //
   //    parentSha is used ONLY as the parent commit (git history).
   //    It is NOT used as base_tree anywhere in this script.
@@ -325,11 +273,6 @@ async function ensureRepo() {
     console.log("ℹ️   No existing main branch — will create it");
   }
 
-  // Fetch the remote tree so unchanged files can be reused without a new blob POST.
-  console.log("ℹ️   Fetching current remote tree for diff …");
-  const remoteTree = await fetchCurrentTree();
-  console.log(`ℹ️   Remote tree: ${remoteTree.size} entries`);
-
   // 3. Build the tree from scratch via interleaved blob+tree chunks.
   //
   //    Mirror guarantee: treeSha starts as null.  The first chunk creates a
@@ -340,11 +283,6 @@ async function ensureRepo() {
   //    files in this bundle; any path absent from the bundle is absent from
   //    the tree, giving true force-push / mirror semantics.
   //
-  //    Dedup optimisation: before uploading a blob, compute the local git
-  //    blob SHA (sha1("blob <len>\0<content>")) and compare against the
-  //    remote tree map.  If they match, reuse the existing SHA directly —
-  //    no blob POST needed.
-  //
   //    WAF note: blobs travel as base64 so the proxy never sees source code.
   //    Each tree POST contains only SHA refs (paths + 40-char hex strings),
   //    keeping payloads well under the connector proxy's body-size limit.
@@ -353,44 +291,28 @@ async function ensureRepo() {
   //    long before GitHub's ~30-minute loose-object GC window.
   let treeSha = null; // null = no base_tree for the first chunk
   const total = files.length;
-  let skipped = 0;
 
   for (let i = 0; i < total; i += BLOB_CHUNK_SIZE) {
     if (i > 0) await sleep(INTER_CHUNK_DELAY_MS);
 
     const chunk = files.slice(i, i + BLOB_CHUNK_SIZE);
 
-    // Upload blobs for this chunk in parallel (base64, WAF-safe).
-    // Files whose content SHA matches the remote are reused without a POST.
+    // Upload blobs for this chunk in parallel (base64, WAF-safe)
     const treeItems = await Promise.all(
       chunk.map(async ({ rel, full, executable }) => {
-        const content = readFileSync(full);
-        const localSha = gitBlobSha(content);
-        const remoteSha = remoteTree.get(rel);
-
-        let blobSha;
-        if (remoteSha && remoteSha === localSha) {
-          // Content unchanged — reuse the existing blob SHA
-          blobSha = remoteSha;
-          skipped++;
-        } else {
-          // New or modified file — upload a new blob
-          const blob = await ghApi(
-            "POST",
-            `/repos/${owner}/${repo}/git/blobs`,
-            {
-              content: content.toString("base64"),
-              encoding: "base64",
-            },
-          );
-          blobSha = blob.sha;
-        }
-
+        const blob = await ghApi(
+          "POST",
+          `/repos/${owner}/${repo}/git/blobs`,
+          {
+            content: readFileSync(full).toString("base64"),
+            encoding: "base64",
+          },
+        );
         return {
           path: rel,
           mode: executable ? "100755" : "100644",
           type: "blob",
-          sha: blobSha,
+          sha: blob.sha,
         };
       }),
     );
@@ -412,9 +334,7 @@ async function ensureRepo() {
     process.stdout.write(`\r  ${done}/${total} files`);
   }
   process.stdout.write("\n");
-  console.log(
-    `ℹ️   Final tree: ${treeSha.slice(0, 7)} (${skipped}/${total} blobs reused, ${total - skipped} uploaded)`,
-  );
+  console.log(`ℹ️   Final tree: ${treeSha.slice(0, 7)}`);
 
   // 4. Verify the tree is complete by fetching it recursively.
   //    The create-tree response is truncated at ~100 entries; the GET with
@@ -464,7 +384,7 @@ async function ensureRepo() {
   }
 
   console.log(
-    `✅  ${owner}/${repo} → ${newCommit.sha.slice(0, 7)} (${files.length} files, ${total - skipped} uploaded, ${skipped} reused)`,
+    `✅  ${owner}/${repo} → ${newCommit.sha.slice(0, 7)} (${files.length} files, exact mirror)`,
   );
 })().catch((err) => {
   console.error(`❌  ${err.message}`);
