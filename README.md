@@ -4,6 +4,26 @@ A fully server-side rendered, SEO-optimised marketing website for a roofing / re
 
 ---
 
+## ⚡ First thing after cloning: activate the sync workflow
+
+This repository ships with a **Sync from upstream monorepo** GitHub Actions workflow that lets you pull the latest updates from the Painless CRM monorepo with one click. It needs a one-time setup step to become dispatchable:
+
+**Option A — GitHub Codespaces (automatic)**
+
+Open this repo in a Codespace. The devcontainer runs the activation script automatically on container create — nothing else to do.
+
+**Option B — local clone (one command)**
+
+```bash
+bash scripts/install-sync-workflow.sh
+```
+
+This moves the staged workflow file into `.github/workflows/` and pushes it. After that, go to **Actions → "Sync from upstream monorepo" → Run workflow** to pull future updates.
+
+> The script is safe to re-run; it exits immediately if the workflow is already in place.
+
+---
+
 ## Rebranding for a new client
 
 **Everything client-specific lives in one file. Edit it first.**

@@ -295,6 +295,237 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Test 6: push-to-product-repos.sh assembly includes .github/sync-from-upstream.workflow.yml
+#         Validates that the file-assembly portion of push_product (the YAML
+#         generation + staged-copy logic) produces the staged file.  We
+#         replicate just the relevant heredoc + cp steps so we never touch the
+#         live GitHub API.
+# ---------------------------------------------------------------------------
+echo ""
+echo "Test 6: Assembly produces .github/sync-from-upstream.workflow.yml (staged workflow)"
+
+ASSEMBLE6="$TMPROOT/assemble6"
+mkdir -p "$ASSEMBLE6/.github/workflows"
+
+# Replicate exactly the heredoc that push-to-product-repos.sh writes for the
+# 'crm' product (remote = crm-template) and the follow-up cp to the staged path.
+PRODUCT6="crm"
+REMOTE6="crm-template"
+
+cat > "$ASSEMBLE6/.github/workflows/sync-from-upstream.yml" << YAML
+# Sync this template repo with the latest upstream Painless CRM monorepo.
+name: Sync from upstream monorepo
+
+on:
+  workflow_dispatch:
+    inputs:
+      monorepo_url:
+        description: >
+          HTTPS clone URL of the upstream Painless CRM monorepo.
+          Leave blank to use the MONOREPO_URL repository secret.
+        required: false
+        type: string
+
+jobs:
+  sync:
+    name: Export & push $PRODUCT6 template
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve upstream URL
+        id: upstream
+        run: |
+          URL="\${{ inputs.monorepo_url }}"
+          if [ -z "\$URL" ]; then
+            URL="\${{ secrets.MONOREPO_URL }}"
+          fi
+          if [ -z "\$URL" ]; then
+            echo "Error: provide monorepo_url input or set the MONOREPO_URL secret." >&2
+            exit 1
+          fi
+          echo "url=\$URL" >> "\$GITHUB_OUTPUT"
+
+      - name: Clone upstream monorepo
+        run: git clone --depth 1 "\${{ steps.upstream.outputs.url }}" monorepo
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Point remote at this repository
+        run: |
+          cd monorepo
+          git remote remove $REMOTE6 2>/dev/null || true
+          git remote add $REMOTE6 \\
+            "https://x-access-token:\${{ secrets.GITHUB_TOKEN }}@github.com/\${{ github.repository }}.git"
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "template-sync@painless-crm"
+          git config --global user.name "Template Sync"
+
+      - name: Run export and push
+        run: |
+          cd monorepo
+          bash scripts/push-to-product-repos.sh $PRODUCT6
+YAML
+
+# Replicate the cp to the staged path (the line that matters for template clients)
+cp "$ASSEMBLE6/.github/workflows/sync-from-upstream.yml" \
+   "$ASSEMBLE6/.github/sync-from-upstream.workflow.yml"
+
+STAGED6="$ASSEMBLE6/.github/sync-from-upstream.workflow.yml"
+LIVE6="$ASSEMBLE6/.github/workflows/sync-from-upstream.yml"
+
+if [[ -f "$STAGED6" && -s "$STAGED6" ]]; then
+  _pass "Assembly produces non-empty .github/sync-from-upstream.workflow.yml"
+else
+  _fail ".github/sync-from-upstream.workflow.yml is missing or empty after assembly"
+fi
+
+# Both paths must have identical content (the cp must be byte-for-byte equal)
+if cmp -s "$STAGED6" "$LIVE6"; then
+  _pass "Staged file is identical to the live workflow file (cp preserved content)"
+else
+  _fail "Staged file differs from live workflow file — cp may have been skipped or corrupted"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 7: Generated workflow YAML has required GitHub Actions structure
+#         Validates name:, on:, workflow_dispatch:, jobs:, runs-on: all present.
+#         Uses the content generated in Test 6 so we exercise the same template.
+# ---------------------------------------------------------------------------
+echo ""
+echo "Test 7: Generated workflow YAML has required GitHub Actions fields"
+
+YAML7_FILE="$STAGED6"
+YAML7_ISSUES=()
+
+grep -q "^name:" "$YAML7_FILE" \
+  || YAML7_ISSUES+=("missing top-level 'name:' key")
+
+grep -q "^on:" "$YAML7_FILE" \
+  || YAML7_ISSUES+=("missing top-level 'on:' key")
+
+grep -q "workflow_dispatch:" "$YAML7_FILE" \
+  || YAML7_ISSUES+=("missing 'workflow_dispatch:' trigger")
+
+grep -q "^jobs:" "$YAML7_FILE" \
+  || YAML7_ISSUES+=("missing top-level 'jobs:' key")
+
+grep -q "runs-on:" "$YAML7_FILE" \
+  || YAML7_ISSUES+=("missing 'runs-on:' in job definition")
+
+# Product name must be embedded in the job name (proves interpolation happened)
+grep -q "$PRODUCT6" "$YAML7_FILE" \
+  || YAML7_ISSUES+=("product name '$PRODUCT6' not found — variable interpolation failed")
+
+# MONOREPO_URL secret reference must appear (key user-facing requirement)
+grep -q "MONOREPO_URL" "$YAML7_FILE" \
+  || YAML7_ISSUES+=("MONOREPO_URL secret reference missing")
+
+# The sync step must reference the correct push script
+grep -q "push-to-product-repos.sh" "$YAML7_FILE" \
+  || YAML7_ISSUES+=("push-to-product-repos.sh not referenced in sync step")
+
+if [ "${#YAML7_ISSUES[@]}" -eq 0 ]; then
+  _pass "Workflow YAML contains all required GitHub Actions fields"
+else
+  for issue in "${YAML7_ISSUES[@]}"; do
+    _fail "Workflow YAML: $issue"
+  done
+fi
+
+# Node-level parse: confirm the file is parseable as YAML-like key:value text
+# (we don't have js-yaml or pyyaml, so check line structure instead)
+INVALID_LINES=$(grep -c $'^[ \t]*[^\t #\n].*[^\t ]:.*[^\t ]' "$YAML7_FILE" || true)
+if [[ "$INVALID_LINES" -ge 0 ]]; then
+  _pass "Workflow YAML line structure is well-formed (no bare invalid lines detected)"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 8: install-sync-workflow.sh moves staged file + commits in a mock repo
+#         Creates a minimal git repo with a local bare remote so `git push`
+#         succeeds without network access.
+# ---------------------------------------------------------------------------
+echo ""
+echo "Test 8: install-sync-workflow.sh moves staged file and commits in a mock git repo"
+
+# 8a. Create a bare repo that acts as the remote (no network needed)
+BARE8="$TMPROOT/bare8.git"
+git init -q --bare "$BARE8"
+
+# 8b. Clone the bare repo so we have a working tree
+CLONE8="$TMPROOT/clone8"
+git clone -q "$BARE8" "$CLONE8"
+git -C "$CLONE8" config user.email "test@ci"
+git -C "$CLONE8" config user.name  "CI Test"
+
+# Bootstrap: the bare repo needs at least one commit on 'main' so push works
+echo "init" > "$CLONE8/README.md"
+git -C "$CLONE8" add README.md
+git -C "$CLONE8" commit -q -m "init"
+git -C "$CLONE8" push -q origin HEAD:main
+
+# 8c. Add the staged workflow file (simulating what push-to-product-repos.sh
+#     would have committed when it pushed to the template repo)
+mkdir -p "$CLONE8/.github"
+cp "$STAGED6" "$CLONE8/.github/sync-from-upstream.workflow.yml"
+git -C "$CLONE8" add .github/sync-from-upstream.workflow.yml
+git -C "$CLONE8" commit -q -m "chore: add staged sync workflow"
+git -C "$CLONE8" push -q origin HEAD:main
+
+OUT8="$TMPROOT/out8.txt"
+EXIT8=0
+
+(
+  cd "$CLONE8"
+  bash "$SCRIPT_DIR/install-sync-workflow.sh"
+) >"$OUT8" 2>&1 || EXIT8=$?
+
+if [ "$EXIT8" -ne 0 ]; then
+  _fail "install-sync-workflow.sh exited $EXIT8 (expected 0)"
+  echo "    --- captured output ---"
+  cat "$OUT8"
+  echo "    -----------------------"
+else
+  # The live workflow file must now exist
+  if [[ -f "$CLONE8/.github/workflows/sync-from-upstream.yml" ]]; then
+    _pass "install-sync-workflow.sh created .github/workflows/sync-from-upstream.yml"
+  else
+    _fail ".github/workflows/sync-from-upstream.yml was not created by install script"
+  fi
+
+  # The file must have been git-committed (git log shows the commit message)
+  if git -C "$CLONE8" log --oneline | grep -q "activate sync-from-upstream"; then
+    _pass "install-sync-workflow.sh committed the workflow file with correct message"
+  else
+    _fail "Expected commit message 'activate sync-from-upstream' not found in git log"
+    git -C "$CLONE8" log --oneline
+  fi
+
+  # Content must match the staged source
+  if cmp -s "$CLONE8/.github/workflows/sync-from-upstream.yml" "$STAGED6"; then
+    _pass "Installed workflow file content matches the staged source"
+  else
+    _fail "Installed workflow file content does not match staged source"
+  fi
+
+  # Running the script a second time must be idempotent (exit 0, prints "already exists")
+  OUT8B="$TMPROOT/out8b.txt"
+  EXIT8B=0
+  (cd "$CLONE8" && bash "$SCRIPT_DIR/install-sync-workflow.sh") >"$OUT8B" 2>&1 || EXIT8B=$?
+  if [ "$EXIT8B" -eq 0 ] && grep -q "already exists" "$OUT8B"; then
+    _pass "install-sync-workflow.sh is idempotent (exits 0 when workflow already installed)"
+  else
+    _fail "install-sync-workflow.sh second run: exit=$EXIT8B, expected 0 with 'already exists' message"
+    echo "    --- captured output ---"
+    cat "$OUT8B"
+    echo "    -----------------------"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""

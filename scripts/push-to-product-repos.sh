@@ -211,6 +211,12 @@ YAML
 
   info "Bundled .github/workflows/sync-from-upstream.yml into $product template"
 
+  # Bundle a Codespaces / VS Code devcontainer that auto-activates the sync
+  # workflow on container create, so Codespaces users skip the manual step.
+  mkdir -p "$tmpdir/.devcontainer"
+  cp "$SCRIPT_DIR/template-devcontainer.json" "$tmpdir/.devcontainer/devcontainer.json"
+  info "Bundled .devcontainer/devcontainer.json into $product template"
+
   # Also write the workflow to a staging path that the Replit connector CAN push
   # (GitHub's Trees API rejects .github/workflows/ without `workflow` scope, but
   # accepts any other path under .github/).  Template users activate it by running
