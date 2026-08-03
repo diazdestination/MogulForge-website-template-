@@ -37,6 +37,12 @@ export const analyticsEventsTable = pgTable(
       table.eventName,
       table.occurredAt,
     ),
+    // Behavior lookups for an identified visitor (lead attribution).
+    index("analytics_org_anon_idx").on(
+      table.organizationId,
+      table.anonymousId,
+      table.occurredAt,
+    ),
   ],
 );
 

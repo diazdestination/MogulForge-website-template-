@@ -1,4 +1,4 @@
-import { index, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { organizationsTable } from "./organizations";
@@ -15,6 +15,8 @@ export const contactsTable = pgTable(
     email: text("email"),
     phone: text("phone"),
     preferredContactMethod: text("preferred_contact_method"),
+    /** Hard do-not-contact flag: blocks ALL automated outreach on every channel. */
+    doNotContact: boolean("do_not_contact").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

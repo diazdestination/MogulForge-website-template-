@@ -13,4 +13,5 @@ export interface ContactInput {
   email?: string;
   phone?: string;
   preferredContactMethod?: string;
+  doNotContact?: boolean;
 }

@@ -367,6 +367,8 @@ export interface Contact {
   phone?: string | null;
   /** @nullable */
   preferredContactMethod?: string | null;
+  /** Hard do-not-contact flag; blocks ALL automated outreach on every channel. */
+  doNotContact?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -378,6 +380,7 @@ export interface ContactInput {
   email?: string;
   phone?: string;
   preferredContactMethod?: string;
+  doNotContact?: boolean;
 }
 
 export interface ContactUpdate {
@@ -391,6 +394,7 @@ export interface ContactUpdate {
   phone?: string | null;
   /** @nullable */
   preferredContactMethod?: string | null;
+  doNotContact?: boolean;
 }
 
 export interface Property {
@@ -466,6 +470,25 @@ export interface Lead {
   source?: string | null;
   /** @nullable */
   sourceDetail?: string | null;
+  /**
+     * Most recent marketing source; `source` keeps the original.
+     * @nullable
+     */
+  latestSource?: string | null;
+  /**
+     * utm_campaign of the first touch.
+     * @nullable
+     */
+  campaign?: string | null;
+  /** @nullable */
+  landingPage?: string | null;
+  /** @nullable */
+  referrer?: string | null;
+  /**
+     * How the lead entered the system (assessment, widget, form, concierge, api).
+     * @nullable
+     */
+  creationMethod?: string | null;
   /**
      * Convenience display name of the linked contact (list endpoints only).
      * @nullable
@@ -861,6 +884,20 @@ export type AssessmentSubmissionConsent = {
   disclosureVersion: string;
 };
 
+/**
+ * Best-effort marketing attribution captured by the embed script on the host page.
+ */
+export interface WidgetAttribution {
+  /** URL of the page the widget was submitted from. */
+  landingPage?: string;
+  referrer?: string;
+  utmSource?: string;
+  utmMedium?: string;
+  utmCampaign?: string;
+  utmTerm?: string;
+  utmContent?: string;
+}
+
 export interface AssessmentSubmission {
   /** @minLength 1 */
   firstName: string;
@@ -888,6 +925,10 @@ export interface AssessmentSubmission {
      * @items.pattern ^/objects/.+
      */
   photoPaths?: string[];
+  attribution?: WidgetAttribution;
+  /** First-party analytics visitor id; submitting contact details consents to linking prior session activity to the lead. */
+  anonymousId?: string;
+  sessionId?: string;
 }
 
 export type UploadUrlRequestContentType = typeof UploadUrlRequestContentType[keyof typeof UploadUrlRequestContentType];
@@ -949,6 +990,9 @@ export interface ConciergeStartRequest {
   source?: string;
   path?: string;
   intent?: string;
+  attribution?: WidgetAttribution;
+  /** First-party analytics visitor id; linked to the lead only once the visitor identifies themselves in the chat. */
+  anonymousId?: string;
 }
 
 export interface ConciergeMessageRequest {
@@ -1237,12 +1281,109 @@ export interface AppointmentReminderSettings {
   emailBody: string;
 }
 
-/** Google Business Profile connection for the public reviews widget. */
+/**
+ * Google Business Profile connection for the public reviews widget.
+ */
 export interface GoogleReviewsConfig {
   /** Google Place ID for the business listing (e.g. ChIJ...). */
   placeId?: string;
   /** Google Places API key with Places Details access. */
   apiKey?: string;
+}
+
+/**
+ * Corner the launcher docks to.
+ */
+export type WidgetSettingsPosition = typeof WidgetSettingsPosition[keyof typeof WidgetSettingsPosition];
+
+
+export const WidgetSettingsPosition = {
+  left: 'left',
+  right: 'right',
+} as const;
+
+/**
+ * Embeddable website widget (closer.js) modules & appearance. All values are public.
+ */
+export interface WidgetSettings {
+  /** Master switch for the lead-capture launcher module. */
+  leadCaptureEnabled: boolean;
+  /** CSS color for the launcher & accents. */
+  primaryColor?: string;
+  /** Corner the launcher docks to. */
+  position?: WidgetSettingsPosition;
+  /** Greeting shown at the top of the open panel. */
+  greeting?: string;
+  /** Label on the launcher button. */
+  buttonLabel?: string;
+  /** When true the widget is hidden from normal visitors and only renders for pages loaded with the mf_preview=1 flag. */
+  testMode?: boolean;
+  /** AI concierge chat module (uses the org knowledge base + intake flow). */
+  conciergeEnabled?: boolean;
+}
+
+export type ConciergeIntentUrgency = typeof ConciergeIntentUrgency[keyof typeof ConciergeIntentUrgency];
+
+
+export const ConciergeIntentUrgency = {
+  normal: 'normal',
+  high: 'high',
+  emergency: 'emergency',
+} as const;
+
+/**
+ * One selectable concierge intent. Array order controls keyword-match priority and quick-reply order.
+ */
+export interface ConciergeIntent {
+  /** Stable key stored on conversations/leads (e.g. "leak"). */
+  key: string;
+  /** Quick-reply label shown to visitors. */
+  label: string;
+  /** CRM service slug recommended for this intent. */
+  service: string;
+  /** Base lead-score points (0-100, clamped server-side). */
+  points: number;
+  /** Score-reason text shown to reps. */
+  reason: string;
+  urgency: ConciergeIntentUrgency;
+  /** Whether this intent runs the emergency triage question first. */
+  triage: boolean;
+  /** Case-insensitive substrings that detect this intent in free text. */
+  keywords: string[];
+}
+
+/**
+ * Org-configurable AI concierge behavior. Defaults preserve the original roofing behavior.
+ */
+export interface ConciergeSettings {
+  assistantName?: string;
+  greeting?: string;
+  intents?: ConciergeIntent[];
+  /** Guardrail line sent when pricing/insurance/safety conclusions are asked. */
+  intakeDisclaimer?: string;
+  emergencySafety?: string;
+  emergencyEscalation?: string;
+  /** Reply when a visitor asks something the knowledge base cannot answer. */
+  unknownAnswerFallback?: string;
+  wrapUpNote?: string;
+}
+
+/**
+ * Quiet hours and frequency caps for automated outreach (playbooks + automation email/SMS). Quiet hours defer sends into the next allowed window; they never drop them.
+ */
+export interface SendingHoursSettings {
+  /** Master switch. Off means historical behavior (send any time). */
+  quietHoursEnabled: boolean;
+  /** IANA timezone the sending window is evaluated in. */
+  timezone: string;
+  /** Inclusive start hour (0-23) of the allowed sending window. */
+  startHour: number;
+  /** Exclusive end hour (1-24) of the allowed sending window. */
+  endHour: number;
+  /** Days sends are allowed (Mon..Sun). */
+  days: string[];
+  /** Max automated touches per contact per rolling 24h (0 = unlimited). */
+  maxTouchesPerDay: number;
 }
 
 export interface OrgSettings {
@@ -1269,8 +1410,10 @@ export interface OrgSettings {
      * @nullable
      */
   fallbackNotificationInbox?: string | null;
-  /** Google Business Profile connection for the public reviews widget. */
   googleReviews?: GoogleReviewsConfig | null;
+  widget?: WidgetSettings | null;
+  concierge?: ConciergeSettings | null;
+  sendingHours?: SendingHoursSettings | null;
   updatedAt?: string;
 }
 
@@ -1287,8 +1430,352 @@ export interface OrgSettingsInput {
   securityAlertsAcknowledgedAt?: string;
   /** Fallback email address for portal message notifications when the assigned rep has no valid email. */
   fallbackNotificationInbox?: string | null;
-  /** Google Business Profile connection for the public reviews widget. */
   googleReviews?: GoogleReviewsConfig;
+  widget?: WidgetSettings;
+  concierge?: ConciergeSettings;
+  sendingHours?: SendingHoursSettings;
+}
+
+export type KnowledgeEntryCategory = typeof KnowledgeEntryCategory[keyof typeof KnowledgeEntryCategory];
+
+
+export const KnowledgeEntryCategory = {
+  company: 'company',
+  service: 'service',
+  service_area: 'service_area',
+  hours: 'hours',
+  faq: 'faq',
+  financing: 'financing',
+  warranty: 'warranty',
+  policy: 'policy',
+  escalation: 'escalation',
+  disclaimer: 'disclaimer',
+  brand_voice: 'brand_voice',
+} as const;
+
+/**
+ * One org knowledge-base fact grounding concierge answers and outreach drafting.
+ */
+export interface KnowledgeEntry {
+  id: string;
+  category: KnowledgeEntryCategory;
+  title: string;
+  content: string;
+  /** Where this fact came from ("manual", "seed"). */
+  source: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type KnowledgeEntryInputCategory = typeof KnowledgeEntryInputCategory[keyof typeof KnowledgeEntryInputCategory];
+
+
+export const KnowledgeEntryInputCategory = {
+  company: 'company',
+  service: 'service',
+  service_area: 'service_area',
+  hours: 'hours',
+  faq: 'faq',
+  financing: 'financing',
+  warranty: 'warranty',
+  policy: 'policy',
+  escalation: 'escalation',
+  disclaimer: 'disclaimer',
+  brand_voice: 'brand_voice',
+} as const;
+
+export interface KnowledgeEntryInput {
+  category: KnowledgeEntryInputCategory;
+  /** @minLength 1 */
+  title: string;
+  /** @minLength 1 */
+  content: string;
+  isActive?: boolean;
+}
+
+export type KnowledgeEntryPatchCategory = typeof KnowledgeEntryPatchCategory[keyof typeof KnowledgeEntryPatchCategory];
+
+
+export const KnowledgeEntryPatchCategory = {
+  company: 'company',
+  service: 'service',
+  service_area: 'service_area',
+  hours: 'hours',
+  faq: 'faq',
+  financing: 'financing',
+  warranty: 'warranty',
+  policy: 'policy',
+  escalation: 'escalation',
+  disclaimer: 'disclaimer',
+  brand_voice: 'brand_voice',
+} as const;
+
+export interface KnowledgeEntryPatch {
+  category?: KnowledgeEntryPatchCategory;
+  /** @minLength 1 */
+  title?: string;
+  /** @minLength 1 */
+  content?: string;
+  isActive?: boolean;
+}
+
+export type SmartFormStatus = typeof SmartFormStatus[keyof typeof SmartFormStatus];
+
+
+export const SmartFormStatus = {
+  draft: 'draft',
+  published: 'published',
+  archived: 'archived',
+} as const;
+
+export type SmartFormStepsItem = { [key: string]: unknown };
+
+export type SmartFormSettings = { [key: string]: unknown };
+
+/**
+ * An org-configurable multi-step form/assessment. Steps and settings are validated server-side.
+ */
+export interface SmartForm {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string | null;
+  status: SmartFormStatus;
+  /** True for system-seeded forms (e.g. the default assessment). */
+  isSeeded: boolean;
+  /** Ordered steps; each has key, title, fields, and an optional showIf branching rule. */
+  steps: SmartFormStepsItem[];
+  settings: SmartFormSettings;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SmartFormInputStatus = typeof SmartFormInputStatus[keyof typeof SmartFormInputStatus];
+
+
+export const SmartFormInputStatus = {
+  draft: 'draft',
+  published: 'published',
+} as const;
+
+export type SmartFormInputStepsItem = { [key: string]: unknown };
+
+export type SmartFormInputSettings = { [key: string]: unknown };
+
+export interface SmartFormInput {
+  name: string;
+  slug: string;
+  description?: string;
+  status?: SmartFormInputStatus;
+  steps: SmartFormInputStepsItem[];
+  settings?: SmartFormInputSettings;
+}
+
+export type SmartFormPatchStatus = typeof SmartFormPatchStatus[keyof typeof SmartFormPatchStatus];
+
+
+export const SmartFormPatchStatus = {
+  draft: 'draft',
+  published: 'published',
+  archived: 'archived',
+} as const;
+
+export type SmartFormPatchStepsItem = { [key: string]: unknown };
+
+export type SmartFormPatchSettings = { [key: string]: unknown };
+
+export interface SmartFormPatch {
+  name?: string;
+  slug?: string;
+  description?: string;
+  status?: SmartFormPatchStatus;
+  steps?: SmartFormPatchStepsItem[];
+  settings?: SmartFormPatchSettings;
+}
+
+export type FormSubmissionRecordAnswers = { [key: string]: unknown };
+
+export type FormSubmissionRecordAttribution = { [key: string]: unknown };
+
+export type FormSubmissionRecordDedupeOutcome = typeof FormSubmissionRecordDedupeOutcome[keyof typeof FormSubmissionRecordDedupeOutcome];
+
+
+export const FormSubmissionRecordDedupeOutcome = {
+  new_lead: 'new_lead',
+  existing_lead: 'existing_lead',
+} as const;
+
+export interface FormSubmissionRecord {
+  id: string;
+  formId: string;
+  leadId?: string | null;
+  contactId?: string | null;
+  answers: FormSubmissionRecordAnswers;
+  attribution: FormSubmissionRecordAttribution;
+  dedupeOutcome: FormSubmissionRecordDedupeOutcome;
+  createdAt: string;
+}
+
+export interface FormShareAssets {
+  /** Public hosted page URL for the form. */
+  hostedUrl: string;
+  /** Script tag to paste into a third-party site. */
+  embedSnippet: string;
+  /** QR code for the hosted URL, as inline SVG markup. */
+  qrSvg: string;
+}
+
+export type PublicFormDefinitionStepsItem = { [key: string]: unknown };
+
+export type PublicFormDefinitionSettings = { [key: string]: unknown };
+
+export interface PublicFormDefinition {
+  slug: string;
+  name: string;
+  description?: string | null;
+  steps: PublicFormDefinitionStepsItem[];
+  settings: PublicFormDefinitionSettings;
+}
+
+/**
+ * Raw answers keyed by field key; validated server-side against the definition.
+ */
+export type SubmitFormBodyAnswers = { [key: string]: unknown };
+
+export type SubmitFormBodyAttribution = { [key: string]: unknown };
+
+export interface SubmitFormBody {
+  /** Raw answers keyed by field key; validated server-side against the definition. */
+  answers: SubmitFormBodyAnswers;
+  attribution?: SubmitFormBodyAttribution;
+  /** First-party analytics visitor id; submitting the form consents to linking prior session activity to the lead. */
+  anonymousId?: string;
+  /** First-party analytics session id for the submitting tab session. */
+  sessionId?: string;
+  /** Lead source override recorded on the lead. */
+  source?: string;
+}
+
+export type SubmitFormResultUrgency = typeof SubmitFormResultUrgency[keyof typeof SubmitFormResultUrgency];
+
+
+export const SubmitFormResultUrgency = {
+  low: 'low',
+  normal: 'normal',
+  high: 'high',
+  emergency: 'emergency',
+} as const;
+
+export interface SubmitFormResult {
+  submissionId: string;
+  leadId: string;
+  deduped: boolean;
+  score: number;
+  scoreReasons: string[];
+  urgency: SubmitFormResultUrgency;
+  guidance: string;
+}
+
+export type PublicWidgetConfigModules = {
+  leadCapture: boolean;
+  concierge: boolean;
+};
+
+/**
+ * Public concierge display config (name + greeting) for the chat module.
+ */
+export type PublicWidgetConfigConcierge = {
+  assistantName: string;
+  greeting: string;
+};
+
+export type PublicWidgetConfigAppearancePosition = typeof PublicWidgetConfigAppearancePosition[keyof typeof PublicWidgetConfigAppearancePosition];
+
+
+export const PublicWidgetConfigAppearancePosition = {
+  left: 'left',
+  right: 'right',
+} as const;
+
+export type PublicWidgetConfigAppearance = {
+  primaryColor: string;
+  position: PublicWidgetConfigAppearancePosition;
+  greeting: string;
+  buttonLabel: string;
+};
+
+/**
+ * Public widget configuration served to the embed script. Never contains secrets.
+ */
+export interface PublicWidgetConfig {
+  modules: PublicWidgetConfigModules;
+  /** Public concierge display config (name + greeting) for the chat module. */
+  concierge?: PublicWidgetConfigConcierge;
+  appearance: PublicWidgetConfigAppearance;
+  businessName?: string | null;
+  /** True while the org is previewing; the widget only renders with the preview flag. */
+  testMode?: boolean;
+}
+
+export type LeadBehaviorSummaryAttribution = {
+  /** @nullable */
+  source?: string | null;
+  /** @nullable */
+  latestSource?: string | null;
+  /** @nullable */
+  campaign?: string | null;
+  /** @nullable */
+  landingPage?: string | null;
+  /** @nullable */
+  referrer?: string | null;
+  /** @nullable */
+  creationMethod?: string | null;
+};
+
+export type LeadBehaviorSummaryBehaviorTopPagesItem = {
+  path: string;
+  views: number;
+};
+
+export type LeadBehaviorSummaryBehavior = {
+  pageViews: number;
+  sessions: number;
+  activeDays: number;
+  /** @nullable */
+  firstSeenAt?: string | null;
+  /** @nullable */
+  lastSeenAt?: string | null;
+  topPages: LeadBehaviorSummaryBehaviorTopPagesItem[];
+  highIntentPages: string[];
+  toolsStarted: string[];
+  abandonedForms: number;
+  highlights: string[];
+};
+
+export interface LeadBehaviorSummary {
+  /** Whether the lead has an associated website visitor id. */
+  linked: boolean;
+  attribution: LeadBehaviorSummaryAttribution;
+  behavior: LeadBehaviorSummaryBehavior;
+}
+
+export interface WidgetLeadSubmission {
+  /** @minLength 1 */
+  firstName: string;
+  lastName?: string;
+  /** @minLength 7 */
+  phone: string;
+  email?: string;
+  /** Free-form note from the visitor. */
+  message?: string;
+  attribution?: WidgetAttribution;
+  /** First-party analytics visitor id from the embed script. */
+  anonymousId?: string;
+}
+
+export interface WidgetLeadResult {
+  leadId: string;
 }
 
 export interface InviteUserInput {
@@ -1301,6 +1788,73 @@ export interface InviteUserInput {
 export interface UpdateUserInput {
   role?: UserRole;
   isActive?: boolean;
+}
+
+export interface AuthorizedDomain {
+  id: string;
+  domain: string;
+  createdAt: string;
+}
+
+/**
+ * Last widget session recorded for the active installation key. Omitted until the first heartbeat arrives.
+ */
+export interface InstallationHeartbeat {
+  lastSeenAt: string;
+  /** closer.js version reported by the last heartbeat. */
+  version?: string | null;
+  /** Page hostname reported by the last heartbeat. */
+  host?: string | null;
+}
+
+export type InstallationCheckResultStatus = typeof InstallationCheckResultStatus[keyof typeof InstallationCheckResultStatus];
+
+
+export const InstallationCheckResultStatus = {
+  installed: 'installed',
+  wrong_key: 'wrong_key',
+  misconfigured: 'misconfigured',
+  domain_not_authorized: 'domain_not_authorized',
+  not_detected: 'not_detected',
+  unreachable: 'unreachable',
+} as const;
+
+export interface InstallationCheckResult {
+  domain: string;
+  status: InstallationCheckResultStatus;
+  /** Human-readable explanation of the status. */
+  detail: string;
+  checkedAt: string;
+}
+
+export interface Installation {
+  /** Browser-safe public key embedded in the website snippet. */
+  publicKey: string;
+  createdAt: string;
+  domains: AuthorizedDomain[];
+  heartbeat?: InstallationHeartbeat;
+  /** Latest "test installation" result per checked domain. */
+  checks: InstallationCheckResult[];
+}
+
+export interface WidgetHeartbeat {
+  version?: string;
+  host?: string;
+}
+
+export interface CheckInstallationInput {
+  /** Domain to check, e.g. example.com. */
+  domain: string;
+}
+
+export interface InstallationKey {
+  publicKey: string;
+  createdAt: string;
+}
+
+export interface AddAuthorizedDomainInput {
+  /** Domain, URL, wildcard ("*.example.com"), or localhost. */
+  domain: string;
 }
 
 export interface ApiKey {
@@ -1466,6 +2020,304 @@ export interface AutomationUpdate {
   conditions?: AutomationUpdateConditions;
   actions?: AutomationActionConfig[];
   isActive?: boolean;
+}
+
+export type PlaybookStepChannel = typeof PlaybookStepChannel[keyof typeof PlaybookStepChannel];
+
+
+export const PlaybookStepChannel = {
+  email: 'email',
+  sms: 'sms',
+} as const;
+
+export interface PlaybookStepVariant {
+  key: string;
+  prompt: string;
+  subject?: string;
+}
+
+export interface PlaybookStep {
+  channel: PlaybookStepChannel;
+  delayMinutes: number;
+  subject?: string;
+  prompt: string;
+  variants?: PlaybookStepVariant[];
+  pinnedVariant?: string;
+}
+
+export interface InsightsFunnelRow {
+  playbookId: string;
+  playbookName: string;
+  stepIndex: number;
+  variantKey: string;
+  channel: string;
+  sent: number;
+  replied: number;
+  booked: number;
+  won: number;
+  lost: number;
+}
+
+export interface InsightsDecision {
+  kind: string;
+  stepIndex?: number | null;
+  explanation: string;
+  createdAt: string;
+}
+
+export interface ConversionInsights {
+  funnel: InsightsFunnelRow[];
+  decisions: InsightsDecision[];
+  baselineReplyRate: number;
+  engineReplyRate: number;
+  liftPercent?: number | null;
+  totalTouches: number;
+}
+
+export interface PlaybookRules {
+  minScore?: number | null;
+  urgencies?: string[];
+  serviceTypes?: string[];
+  sources?: string[];
+}
+
+export interface Playbook {
+  id: string;
+  name: string;
+  seedKey?: string | null;
+  isActive: boolean;
+  enrollmentRules: PlaybookRules;
+  steps: PlaybookStep[];
+  updatedAt?: string;
+}
+
+export interface PlaybookInput {
+  /** @minLength 1 */
+  name: string;
+  isActive?: boolean;
+  enrollmentRules?: PlaybookRules;
+  steps: PlaybookStep[];
+}
+
+export interface PlaybookUpdate {
+  /** @minLength 1 */
+  name?: string;
+  isActive?: boolean;
+  enrollmentRules?: PlaybookRules;
+  steps?: PlaybookStep[];
+}
+
+export interface EnrollmentHistoryEntry {
+  at: string;
+  kind: string;
+  stepIndex?: number;
+  channel?: string;
+  detail?: string;
+}
+
+export type PlaybookEnrollmentStatus = typeof PlaybookEnrollmentStatus[keyof typeof PlaybookEnrollmentStatus];
+
+
+export const PlaybookEnrollmentStatus = {
+  active: 'active',
+  paused: 'paused',
+  completed: 'completed',
+  stopped: 'stopped',
+} as const;
+
+export interface PlaybookEnrollment {
+  id: string;
+  playbookId: string;
+  leadId: string;
+  status: PlaybookEnrollmentStatus;
+  currentStep: number;
+  pauseReason?: string | null;
+  nextRunAt?: string | null;
+  history: EnrollmentHistoryEntry[];
+  playbookName?: string;
+  totalSteps?: number;
+}
+
+export interface LeadEnrollmentEnvelope {
+  enrollment: PlaybookEnrollment | null;
+}
+
+/**
+ * Map of import field name to 0-based CSV column index.
+ */
+export type LeadImportRequestMapping = {[key: string]: number};
+
+export interface LeadImportRequest {
+  csv: string;
+  /** Map of import field name to 0-based CSV column index. */
+  mapping: LeadImportRequestMapping;
+  fileName?: string;
+  hasHeader?: boolean;
+  defaultStatus?: string;
+  defaultSource?: string;
+}
+
+export interface LeadImport {
+  id: string;
+  fileName?: string | null;
+  totalRows: number;
+  imported: number;
+  duplicates: number;
+  skipped: number;
+  suppressed: number;
+  errors: string[];
+  createdAt: string;
+}
+
+export interface ReactivationSegment {
+  statuses?: string[];
+  minAgeDays?: number | null;
+  inactiveDays?: number | null;
+  sources?: string[];
+}
+
+export interface ReactivationSegmentPreviewRequest {
+  segment?: ReactivationSegment;
+}
+
+export interface ReactivationOutreachPreviewRequest {
+  playbookId: string;
+  segment?: ReactivationSegment;
+}
+
+export interface ReactivationSegmentPreset {
+  key: string;
+  name: string;
+  description: string;
+  segment: ReactivationSegment;
+  count: number;
+}
+
+export type ReactivationSegmentPreviewSampleItem = {
+  id: string;
+  contactName?: string | null;
+  status: string;
+  source?: string | null;
+  createdAt: string;
+};
+
+export interface ReactivationSegmentPreview {
+  segment: ReactivationSegment;
+  count: number;
+  sample: ReactivationSegmentPreviewSampleItem[];
+}
+
+export interface ReactivationCampaignInput {
+  name: string;
+  playbookId: string;
+  segment?: ReactivationSegment;
+  ratePerHour?: number;
+}
+
+export type ReactivationCampaignStatus = typeof ReactivationCampaignStatus[keyof typeof ReactivationCampaignStatus];
+
+
+export const ReactivationCampaignStatus = {
+  draft: 'draft',
+  running: 'running',
+  paused: 'paused',
+  completed: 'completed',
+  cancelled: 'cancelled',
+} as const;
+
+export interface ReactivationCampaign {
+  id: string;
+  name: string;
+  playbookId: string;
+  playbookName?: string | null;
+  segment: ReactivationSegment;
+  status: ReactivationCampaignStatus;
+  ratePerHour: number;
+  totalLeads: number;
+  enrolledCount?: number;
+  launchedAt?: string | null;
+  completedAt?: string | null;
+  createdAt: string;
+}
+
+export type ReactivationOutreachPreviewSamplesItem = {
+  leadId: string;
+  contactName?: string | null;
+  channel: string;
+  subject?: string | null;
+  body: string;
+};
+
+export interface ReactivationOutreachPreview {
+  samples: ReactivationOutreachPreviewSamplesItem[];
+}
+
+export interface ReactivationCampaignReport {
+  campaign: ReactivationCampaign;
+  enrolled: number;
+  pending: number;
+  skipped: number;
+  contacted: number;
+  replied: number;
+  booked: number;
+  recoveredRevenueCents: number;
+}
+
+export interface NextActionDraft {
+  subject?: string;
+  body: string;
+  provider: string;
+}
+
+export type NextBestActionActionType = typeof NextBestActionActionType[keyof typeof NextBestActionActionType];
+
+
+export const NextBestActionActionType = {
+  reply_portal_message: 'reply_portal_message',
+  call_now: 'call_now',
+  send_message: 'send_message',
+  follow_up_estimate: 'follow_up_estimate',
+  schedule_follow_up: 'schedule_follow_up',
+  none: 'none',
+} as const;
+
+export type NextBestActionChannel = typeof NextBestActionChannel[keyof typeof NextBestActionChannel];
+
+
+export const NextBestActionChannel = {
+  email: 'email',
+  sms: 'sms',
+  phone: 'phone',
+} as const;
+
+export interface NextBestAction {
+  leadId: string;
+  actionType: NextBestActionActionType;
+  title: string;
+  reasons: string[];
+  priority: number;
+  channel?: NextBestActionChannel;
+  draft?: NextActionDraft;
+  leadSummary?: string | null;
+  leadStatus: string;
+  contactName?: string | null;
+  score: number;
+}
+
+export type NextActionFeedbackInputResponse = typeof NextActionFeedbackInputResponse[keyof typeof NextActionFeedbackInputResponse];
+
+
+export const NextActionFeedbackInputResponse = {
+  sent: 'sent',
+  edited: 'edited',
+  snoozed: 'snoozed',
+  dismissed: 'dismissed',
+} as const;
+
+export interface NextActionFeedbackInput {
+  actionType: string;
+  response: NextActionFeedbackInputResponse;
+  snoozeHours?: number;
 }
 
 export type AutomationActionResultStatus = typeof AutomationActionResultStatus[keyof typeof AutomationActionResultStatus];
@@ -1714,6 +2566,18 @@ export type LogoutBrowserSessionParams = {
 returnTo?: string;
 };
 
+export type DeleteForm200Outcome = typeof DeleteForm200Outcome[keyof typeof DeleteForm200Outcome];
+
+
+export const DeleteForm200Outcome = {
+  deleted: 'deleted',
+  archived: 'archived',
+} as const;
+
+export type DeleteForm200 = {
+  outcome: DeleteForm200Outcome;
+};
+
 export type ListContactsParams = {
 search?: string;
 /**
@@ -1813,6 +2677,10 @@ export type ListAutomationRunsParams = {
 automationId?: string;
 };
 
+export type ListTodayActionsParams = {
+limit?: number;
+};
+
 export type ListWebhookDeliveriesParams = {
 endpointId?: string;
 };
@@ -1820,4 +2688,3 @@ endpointId?: string;
 export type LogoutPortalSession200 = {
   ok: boolean;
 };
-

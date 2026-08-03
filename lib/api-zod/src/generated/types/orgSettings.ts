@@ -7,10 +7,14 @@
  */
 import type { AppointmentReminderSettings } from './appointmentReminderSettings';
 import type { BusinessProfile } from './businessProfile';
+import type { ConciergeSettings } from './conciergeSettings';
+import type { GoogleReviewsConfig } from './googleReviewsConfig';
 import type { InspectionAvailabilitySettings } from './inspectionAvailabilitySettings';
 import type { LeadScoringSettings } from './leadScoringSettings';
+import type { SendingHoursSettings } from './sendingHoursSettings';
 import type { ServiceAreaEntry } from './serviceAreaEntry';
 import type { ServiceEntry } from './serviceEntry';
+import type { WidgetSettings } from './widgetSettings';
 
 export interface OrgSettings {
   id: string;
@@ -36,5 +40,9 @@ export interface OrgSettings {
      * @nullable
      */
   fallbackNotificationInbox?: string | null;
+  googleReviews?: GoogleReviewsConfig | null;
+  widget?: WidgetSettings | null;
+  concierge?: ConciergeSettings | null;
+  sendingHours?: SendingHoursSettings | null;
   updatedAt?: string;
 }

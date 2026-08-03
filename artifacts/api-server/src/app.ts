@@ -40,6 +40,9 @@ app.use(
   "/api/v1/public/concierge/transcriptions",
   express.json({ limit: "8mb" }),
 );
+// CSV lead imports post the raw file contents as a JSON string (up to 5MB
+// of CSV, ~6MB with JSON escaping); the route re-enforces the 5MB CSV cap.
+app.use("/api/v1/lead-imports", express.json({ limit: "8mb" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(authMiddleware);

@@ -5,9 +5,13 @@
  * Painless GrowthOS API
  * OpenAPI spec version: 0.1.0
  */
+import type { WidgetAttribution } from './widgetAttribution';
 
 export interface ConciergeStartRequest {
   source?: string;
   path?: string;
   intent?: string;
+  attribution?: WidgetAttribution;
+  /** First-party analytics visitor id; linked to the lead only once the visitor identifies themselves in the chat. */
+  anonymousId?: string;
 }

@@ -42,6 +42,22 @@ export const leadsTable = pgTable(
     estimatedValueCents: integer("estimated_value_cents"),
     firstTouch: jsonb("first_touch").$type<Record<string, unknown>>(),
     lastTouch: jsonb("last_touch").$type<Record<string, unknown>>(),
+    /** Most recent marketing source (source keeps the ORIGINAL source). */
+    latestSource: text("latest_source"),
+    /** utm_campaign of the first touch (queryable copy of firstTouch.utm). */
+    campaign: text("campaign"),
+    /** First page the visitor landed on before converting. */
+    landingPage: text("landing_page"),
+    /** External referrer of the first touch. */
+    referrer: text("referrer"),
+    /** How the lead entered the system: assessment | widget | form | concierge | api | import. */
+    creationMethod: text("creation_method"),
+    /**
+     * Website analytics visitor id linked at identification time (consent-
+     * aware: only set when the visitor identified themselves through a
+     * capture flow). Anonymous visitors are never linked.
+     */
+    anonymousId: text("anonymous_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -56,6 +72,7 @@ export const leadsTable = pgTable(
       table.organizationId,
       table.assignedUserId,
     ),
+    index("leads_org_anon_idx").on(table.organizationId, table.anonymousId),
   ],
 );
 

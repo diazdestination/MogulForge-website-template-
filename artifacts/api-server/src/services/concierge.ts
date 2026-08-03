@@ -7,8 +7,10 @@
  * insurance approval, pricing, damage conclusions, or structural safety, and
  * emits emergency safety language when danger is indicated.
  */
-import { CLIENT } from "../lib/client.config";
 import {
+  DEFAULT_CONCIERGE_SETTINGS,
+  type ConciergeIntent,
+  type ConciergeSettings,
   activitiesTable,
   appointmentsTable,
   auditEventsTable,
@@ -19,6 +21,7 @@ import {
   crmTasksTable,
   db,
   leadsTable,
+  organizationsTable,
   propertiesTable,
   DEFAULT_LEAD_SCORING,
   type Conversation,
@@ -32,9 +35,19 @@ import {
   emitAutomationEvent,
   scheduleAppointmentReminder,
 } from "./automation";
+import {
+  type AttributionInput,
+  behaviorSignals,
+  buildTouch,
+  clampScore,
+  leadAttributionColumns,
+} from "./attribution";
 import { insertInspectionIfAvailable } from "./inspection-booking";
+import { stopEnrollmentsForLead } from "./playbooks";
+import { recordLeadOutcome } from "./playbook-learning";
+import { buildKnowledgeFacts, findKnowledgeAnswer } from "./knowledge";
 import { isSafeMailbox, mockAiProvider, openAiProvider, providers, type AiProvider } from "./providers";
-import { getAiInstructions, getInspectionAvailability, getLeadScoring, getOrgSettings } from "./settings";
+import { getAiInstructions, getConciergeSettings, getInspectionAvailability, getLeadScoring, getOrgSettings } from "./settings";
 
 /** Concierge-scoped provider selection: real OpenAI when a key is present. */
 function conciergeAi(): AiProvider {
@@ -43,19 +56,15 @@ function conciergeAi(): AiProvider {
 
 export const CONCIERGE_DISCLOSURE_VERSION = "concierge-v1-2026-08";
 
-const INSPECTION_DISCLAIMER =
-  "Just so you know — I can't diagnose damage, quote pricing, or predict insurance outcomes from chat. A professional on-site inspection is required for that, and that's exactly what I'll help you set up.";
+/** Effective org concierge config (defaults = original Painless behavior). */
+export type ConciergeConfig = Required<ConciergeSettings>;
 
-const EMERGENCY_SAFETY = [
-  "⚠️ Safety first, before anything else:",
-  "• Stay out of rooms with sagging or bulging ceilings — they can give way.",
-  "• Do not touch standing water near outlets, fixtures, or appliances. If it's safe to reach your panel, shut off power to affected areas.",
-  "• Place containers under active drips and move valuables clear.",
-  "• If you suspect structural collapse or electrical danger, leave the area and call 911.",
-].join("\n");
+/** Intent catalog as a key-indexed map for a config. */
+function intentMap(cfg: ConciergeConfig): Record<string, ConciergeIntent> {
+  return Object.fromEntries(cfg.intents.map((i) => [i.key, i]));
+}
 
-const EMERGENCY_ESCALATION =
-  "I'm flagging this as an emergency — our team treats active leaks and hazards as same-day priorities. If you'd rather talk to a person right now, call our emergency line from the top of the page. Otherwise, give me about 60 seconds of questions and I'll get a priority callback dispatched.";
+const DEFAULT_CFG: ConciergeConfig = DEFAULT_CONCIERGE_SETTINGS;
 
 type Step =
   | "intent"
@@ -103,59 +112,27 @@ export interface ConciergeState {
   [key: string]: unknown;
 }
 
-const INTENTS: Record<
-  string,
-  { label: string; service: string; points: number; reason: string; urgency: Urgency; triage: boolean }
-> = {
-  leak: { label: "Active leak", service: "roof-repair", points: 40, reason: "Active leak reported", urgency: "emergency", triage: true },
-  storm: { label: "Storm damage", service: "storm-damage", points: 25, reason: "Storm damage reported", urgency: "high", triage: true },
-  "water-damage": { label: "Water damage", service: "water-damage-restoration", points: 30, reason: "Water damage reported", urgency: "high", triage: true },
-  replacement: { label: "Roof replacement", service: "roof-replacement", points: 20, reason: "Full replacement interest", urgency: "normal", triage: false },
-  repair: { label: "Roof repair", service: "roof-repair", points: 15, reason: "Repair requested", urgency: "normal", triage: false },
-  claim: { label: "Insurance claim help", service: "insurance-claim-assistance", points: 25, reason: "Insurance claim assistance requested", urgency: "normal", triage: false },
-  metal: { label: "Metal roofing", service: "metal-roofing", points: 15, reason: "Metal roofing interest", urgency: "normal", triage: false },
-  commercial: { label: "Commercial roofing", service: "commercial-roofing", points: 20, reason: "Commercial roofing inquiry", urgency: "normal", triage: false },
-  inspection: { label: "Inspection / maintenance", service: "roof-inspection", points: 10, reason: "Inspection or maintenance request", urgency: "normal", triage: false },
-};
-
-const INTENT_KEYWORDS: [string, RegExp][] = [
-  ["leak", /\bleak|dripping|drip\b/i],
-  ["water-damage", /water damage|flood|soaked|stain|wet ceiling|wet wall/i],
-  ["storm", /\bstorm|hail|wind|hurricane|tornado\b/i],
-  ["claim", /insurance|claim|adjuster|deductible/i],
-  ["metal", /\bmetal|standing seam\b/i],
-  ["commercial", /commercial|business|warehouse|flat roof|tpo|epdm/i],
-  ["replacement", /replac|new roof|re-?roof/i],
-  ["repair", /repair|fix|shingle|patch/i],
-  ["inspection", /inspect|maintenance|check.?up|tune.?up/i],
-];
-
+// Universal guardrails — deliberately NOT org-configurable: every industry
+// gets the same protection against emergencies going unnoticed and against
+// the assistant inventing pricing/insurance/safety conclusions.
 const EMERGENCY_KEYWORDS = /collaps|sagging|sparking|pouring in|gushing|emergency/i;
 const PROHIBITED_TOPIC = /how much|price|pricing|cost|quote|estimate\??$|will insurance|covered by insurance|approve|guarantee|total(ed| loss)|is it safe/i;
-
-const INTENT_QUICK_REPLIES = [
-  "Active leak",
-  "Storm damage",
-  "Roof replacement",
-  "Roof repair",
-  "Insurance claim help",
-  "Water damage",
-  "Metal roofing",
-  "Commercial roofing",
-  "Inspection / maintenance",
-];
+/** A visitor message that reads as a question rather than an intake answer. */
+const QUESTION_LIKE = /\?\s*$/;
 
 interface OfferedSlot {
   label: string;
   start: string; // ISO
   end: string; // ISO
 }
-function detectIntent(text: string): string | undefined {
-  const byLabel = Object.entries(INTENTS).find(
-    ([, v]) => v.label.toLowerCase() === text.trim().toLowerCase(),
-  );
-  if (byLabel) return byLabel[0];
-  for (const [intent, re] of INTENT_KEYWORDS) if (re.test(text)) return intent;
+function detectIntent(text: string, cfg: ConciergeConfig): string | undefined {
+  const trimmed = text.trim().toLowerCase();
+  const byLabel = cfg.intents.find((i) => i.label.toLowerCase() === trimmed);
+  if (byLabel) return byLabel.key;
+  const haystack = text.toLowerCase();
+  for (const intent of cfg.intents) {
+    if (intent.keywords.some((k) => haystack.includes(k))) return intent.key;
+  }
   return undefined;
 }
 
@@ -166,12 +143,12 @@ function isNo(text: string): boolean {
   return /^\s*(n|no|nope|nah|not)\b/i.test(text);
 }
 
-function promptFor(step: Step, state: ConciergeState): { text: string; quickReplies: string[] } {
+function promptFor(step: Step, state: ConciergeState, cfg: ConciergeConfig): { text: string; quickReplies: string[] } {
   switch (step) {
     case "intent":
       return {
         text: "What brought you in today? Pick the closest option or describe it in your own words.",
-        quickReplies: INTENT_QUICK_REPLIES,
+        quickReplies: cfg.intents.map((i) => i.label),
       };
     case "emergency_check":
       return {
@@ -225,10 +202,11 @@ function promptFor(step: Step, state: ConciergeState): { text: string; quickRepl
 export function scoreConcierge(
   state: ConciergeState,
   weights: LeadScoringSettings = DEFAULT_LEAD_SCORING,
+  cfg: ConciergeConfig = DEFAULT_CFG,
 ): { score: number; scoreReasons: string[] } {
   const reasons: string[] = [];
   let score = 0;
-  const intent = state.intent ? INTENTS[state.intent] : undefined;
+  const intent = state.intent ? intentMap(cfg)[state.intent] : undefined;
   if (intent && state.intent) {
     score += weights.intentPoints[state.intent] ?? intent.points;
     reasons.push(intent.reason);
@@ -267,9 +245,9 @@ export function scoreConcierge(
   return { score: Math.max(0, Math.min(Math.round(score), 100)), scoreReasons: reasons };
 }
 
-function knownFacts(state: ConciergeState): string[] {
+function knownFacts(state: ConciergeState, cfg: ConciergeConfig = DEFAULT_CFG): string[] {
   const facts: string[] = [];
-  const intent = state.intent ? INTENTS[state.intent] : undefined;
+  const intent = state.intent ? intentMap(cfg)[state.intent] : undefined;
   if (intent) facts.push(`Request: ${intent.label} (recommended service: ${intent.service})`);
   facts.push(`Urgency: ${state.urgency}${state.emergencyFlag ? " — hazard conditions reported (safety guidance sent)" : ""}`);
   if (state.details) facts.push(`Homeowner description: ${state.details.slice(0, 300)}`);
@@ -299,8 +277,8 @@ function knownFacts(state: ConciergeState): string[] {
 }
 
 /** Deterministic internal summary used for partial/progressive updates. */
-function buildPartialSummary(state: ConciergeState): string {
-  return ["Concierge intake (in progress)", ...knownFacts(state)].join("\n");
+function buildPartialSummary(state: ConciergeState, cfg: ConciergeConfig = DEFAULT_CFG): string {
+  return ["Concierge intake (in progress)", ...knownFacts(state, cfg)].join("\n");
 }
 
 /**
@@ -314,8 +292,20 @@ async function syncLead(
   opts: { sourceIp?: string; userAgent?: string; final?: boolean },
 ): Promise<void> {
   if (!state.firstName || !state.phone) return;
-  const { score, scoreReasons } = scoreConcierge(state, await getLeadScoring(organizationId));
-  const intent = state.intent ? INTENTS[state.intent] : undefined;
+  const cfg = await getConciergeSettings(organizationId);
+  const weights = await getLeadScoring(organizationId);
+  const base = scoreConcierge(state, weights, cfg);
+  // Website behavior signals (empty when the chat carried no visitor id).
+  const behavior = await behaviorSignals(
+    organizationId,
+    typeof state.anonymousId === "string" ? state.anonymousId : null,
+    weights,
+  );
+  const behaviorScored = {
+    score: clampScore(base.score + behavior.points),
+    scoreReasons: [...base.scoreReasons, ...behavior.reasons],
+  };
+  const intent = state.intent ? intentMap(cfg)[state.intent] : undefined;
 
   await db.transaction(async (tx) => {
     if (!state.contactId) {
@@ -361,7 +351,12 @@ async function syncLead(
       state.propertyId = property.id;
     }
 
-    const touch = { channel: "web_chat", source: conversation.source ?? "concierge", at: new Date().toISOString() };
+    const source = conversation.source ?? "concierge";
+    const touch = buildTouch({
+      channel: "web_chat",
+      source,
+      attribution: (state.attribution as AttributionInput | undefined) ?? null,
+    });
     if (!state.leadId) {
       const [lead] = await tx
         .insert(leadsTable)
@@ -372,13 +367,16 @@ async function syncLead(
           status: opts.final ? "ai_qualified" : "new",
           urgency: state.urgency,
           serviceType: intent?.service ?? state.intent ?? null,
-          source: conversation.source ?? "concierge",
           sourceDetail: "ai-roof-concierge",
-          score,
-          scoreReasons,
-          summary: buildPartialSummary(state).split("\n").slice(0, 2).join(" — "),
-          firstTouch: touch,
-          lastTouch: touch,
+          score: behaviorScored.score,
+          scoreReasons: behaviorScored.scoreReasons,
+          summary: buildPartialSummary(state, cfg).split("\n").slice(0, 2).join(" — "),
+          ...leadAttributionColumns({
+            source,
+            creationMethod: "concierge",
+            touch,
+            anonymousId: typeof state.anonymousId === "string" ? state.anonymousId : null,
+          }),
         })
         .returning();
       state.leadId = lead.id;
@@ -391,9 +389,13 @@ async function syncLead(
         leadId: lead.id,
         contactId: state.contactId,
         type: "lead_captured",
-        title: "Lead created by AI Roof Concierge",
-        body: buildPartialSummary(state),
-        metadata: { conversationId: conversation.id, score, scoreReasons },
+        title: `Lead created by ${cfg.assistantName}`,
+        body: buildPartialSummary(state, cfg),
+        metadata: {
+          conversationId: conversation.id,
+          score: behaviorScored.score,
+          scoreReasons: behaviorScored.scoreReasons,
+        },
       });
       await tx.insert(auditEventsTable).values({
         organizationId,
@@ -410,10 +412,11 @@ async function syncLead(
           propertyId: state.propertyId ?? null,
           urgency: state.urgency,
           serviceType: intent?.service ?? state.intent ?? null,
-          score,
-          scoreReasons,
+          score: behaviorScored.score,
+          scoreReasons: behaviorScored.scoreReasons,
           status: opts.final ? "ai_qualified" : undefined,
-          lastTouch: touch,
+          lastTouch: touch as unknown as Record<string, unknown>,
+          latestSource: source,
         })
         .where(and(eq(leadsTable.id, state.leadId), eq(leadsTable.organizationId, organizationId)));
     }
@@ -444,6 +447,8 @@ export async function startConversation(params: {
   organizationId: string;
   source?: string;
   intentHint?: string;
+  attribution?: AttributionInput | null;
+  anonymousId?: string | null;
 }): Promise<{
   conversationId: string;
   messages: string[];
@@ -453,21 +458,30 @@ export async function startConversation(params: {
   leadId: string | null;
   urgency: Urgency;
 }> {
-  const hinted = params.intentHint ? detectIntent(params.intentHint) : undefined;
+  const cfg = await getConciergeSettings(params.organizationId);
+  const intents = intentMap(cfg);
+  const hinted = params.intentHint ? detectIntent(params.intentHint, cfg) : undefined;
   const state: ConciergeState = { step: "intent", urgency: "normal" };
+  // Attribution + visitor id captured at chat start ride in the conversation
+  // state; they reach the lead only if the visitor later identifies
+  // themselves (name + phone) — anonymous chats never link.
+  if (params.attribution) state.attribution = params.attribution;
+  if (params.anonymousId && typeof params.anonymousId === "string") {
+    state.anonymousId = params.anonymousId.slice(0, 100);
+  }
   const messages: string[] = [
-    CLIENT.aiGreeting,
+    cfg.greeting,
   ];
   let quickReplies: string[];
   if (hinted) {
     state.intent = hinted;
-    state.urgency = INTENTS[hinted].urgency;
-    state.step = INTENTS[hinted].triage ? "emergency_check" : "details";
-    const p = promptFor(state.step, state);
+    state.urgency = intents[hinted].urgency;
+    state.step = intents[hinted].triage ? "emergency_check" : "details";
+    const p = promptFor(state.step, state, cfg);
     messages.push(p.text);
     quickReplies = p.quickReplies;
   } else {
-    const p = promptFor("intent", state);
+    const p = promptFor("intent", state, cfg);
     messages.push(p.text);
     quickReplies = p.quickReplies;
   }
@@ -582,6 +596,17 @@ export async function handleMessage(params: {
           closedTaskIds: closedTasks.map((t) => t.id),
         },
       });
+      // The homeowner is actively chatting again — pause automated
+      // playbook outreach so the concierge conversation isn't stepped on.
+      await stopEnrollmentsForLead(
+        params.organizationId,
+        conversation.leadId,
+        "homeowner resumed concierge chat",
+        "paused",
+      );
+      // Learning loop: a resumed chat is a reply — attribute it to the
+      // outreach touches that preceded it.
+      await recordLeadOutcome(params.organizationId, conversation.leadId, "replied");
       await db.insert(auditEventsTable).values({
         organizationId: params.organizationId,
         actorUserId: null,
@@ -609,30 +634,67 @@ export async function handleMessage(params: {
     content: text,
   });
 
+  const cfg = await getConciergeSettings(params.organizationId);
+  const intents = intentMap(cfg);
+
   // Global guardrail: pricing / insurance-approval / safety-conclusion asks.
-  if (PROHIBITED_TOPIC.test(text) && state.step !== "consent") {
-    out.push(INSPECTION_DISCLAIMER);
+  const prohibited = PROHIBITED_TOPIC.test(text) && state.step !== "consent";
+  if (prohibited) {
+    out.push(cfg.intakeDisclaimer);
   }
   // Global emergency keyword watch at any step.
   if (EMERGENCY_KEYWORDS.test(text) && !state.emergencyFlag) {
     state.emergencyFlag = true;
     state.urgency = "emergency";
-    out.push(EMERGENCY_SAFETY, EMERGENCY_ESCALATION);
+    out.push(cfg.emergencySafety, cfg.emergencyEscalation);
   }
 
+  // Knowledge-grounded Q&A: when the visitor asks a question mid-intake, the
+  // concierge answers ONLY from the org knowledge base. On a match it quotes
+  // the stored entry and re-asks the current step; with no match it says it
+  // doesn't know (never guesses) and flags it for human follow-up. Yes/no
+  // steps are exempt ("is that ok?" style answers must stay in the flow).
+  let answeredQuestion = false;
+  if (
+    QUESTION_LIKE.test(text) &&
+    !["emergency_check", "consent", "scheduling"].includes(state.step)
+  ) {
+    const entry = await findKnowledgeAnswer(params.organizationId, text);
+    if (entry) {
+      out.push(entry.content);
+      answeredQuestion = true;
+    } else if (!prohibited) {
+      out.push(cfg.unknownAnswerFallback);
+      state.openQuestions = [
+        ...((state.openQuestions as string[] | undefined) ?? []),
+        text.slice(0, 300),
+      ].slice(-5);
+      // Not a hard stop: intake continues so contact info still gets captured
+      // for the human follow-up.
+      answeredQuestion = state.step !== "intent";
+    } else {
+      answeredQuestion = state.step !== "intent";
+    }
+  }
+
+  if (answeredQuestion) {
+    const p = promptFor(state.step, state, cfg);
+    if (p.text) out.push(p.text);
+    quickReplies = p.quickReplies;
+  } else
   switch (state.step) {
     case "intent": {
-      const intent = detectIntent(text);
+      const intent = detectIntent(text, cfg);
       if (!intent) {
         out.push("I want to route you to the right team. Which of these is closest to your situation?");
-        quickReplies = INTENT_QUICK_REPLIES;
+        quickReplies = cfg.intents.map((i) => i.label);
         break;
       }
       state.intent = intent;
-      if (INTENTS[intent].urgency !== "normal" || state.urgency === "normal") {
-        state.urgency = state.emergencyFlag ? "emergency" : INTENTS[intent].urgency;
+      if (intents[intent].urgency !== "normal" || state.urgency === "normal") {
+        state.urgency = state.emergencyFlag ? "emergency" : intents[intent].urgency;
       }
-      state.step = INTENTS[intent].triage && !state.emergencyFlag ? "emergency_check" : "details";
+      state.step = intents[intent].triage && !state.emergencyFlag ? "emergency_check" : "details";
       break;
     }
     case "emergency_check": {
@@ -640,7 +702,7 @@ export async function handleMessage(params: {
         if (!state.emergencyFlag) {
           state.emergencyFlag = true;
           state.urgency = "emergency";
-          out.push(EMERGENCY_SAFETY, EMERGENCY_ESCALATION);
+          out.push(cfg.emergencySafety, cfg.emergencyEscalation);
         }
       } else if (isNo(text)) {
         out.push("Good — no immediate hazard signs. Let's keep this moving.");
@@ -654,7 +716,7 @@ export async function handleMessage(params: {
     }
     case "details": {
       state.details = text;
-      if (!out.some((m) => m === INSPECTION_DISCLAIMER)) out.push(INSPECTION_DISCLAIMER);
+      if (!out.some((m) => m === cfg.intakeDisclaimer)) out.push(cfg.intakeDisclaimer);
       state.step = "name";
       break;
     }
@@ -774,7 +836,7 @@ export async function handleMessage(params: {
         leadId: state.leadId ?? null,
         contactId: state.contactId ?? null,
         propertyId: state.propertyId ?? null,
-        notes: `Booked by AI Roof Concierge during chat${state.intent ? ` (${INTENTS[state.intent]?.label ?? state.intent})` : ""}.`,
+        notes: `Booked by ${cfg.assistantName} during chat${state.intent ? ` (${intents[state.intent]?.label ?? state.intent})` : ""}.`,
       });
       if (!appointment) {
         // Someone else grabbed this window between offer and booking — re-offer.
@@ -865,7 +927,7 @@ export async function handleMessage(params: {
   // Ask the next question if the conversation isn't finished.
   const finishing = state.step === "done" && (conversation.status === "active" || resumed);
   if (state.step !== "done" && quickReplies.length === 0) {
-    const p = promptFor(state.step, state);
+    const p = promptFor(state.step, state, cfg);
     if (p.text) out.push(p.text);
     quickReplies = p.quickReplies;
   }
@@ -905,18 +967,24 @@ export async function handleMessage(params: {
       .from(conversationMessagesTable)
       .where(eq(conversationMessagesTable.conversationId, conversation.id))
       .orderBy(asc(conversationMessagesTable.createdAt));
-    const { score, scoreReasons } = scoreConcierge(
-      state,
-      await getLeadScoring(params.organizationId),
+    const finalWeights = await getLeadScoring(params.organizationId);
+    const finalBase = scoreConcierge(state, finalWeights, cfg);
+    const finalBehavior = await behaviorSignals(
+      params.organizationId,
+      typeof state.anonymousId === "string" ? state.anonymousId : null,
+      finalWeights,
     );
+    const score = clampScore(finalBase.score + finalBehavior.points);
+    const scoreReasons = [...finalBase.scoreReasons, ...finalBehavior.reasons];
     try {
       const orgInstructions = await getAiInstructions(params.organizationId);
+      const knowledgeFacts = await buildKnowledgeFacts(params.organizationId);
       const ai = await conciergeAi().generateSalesSummary({
         intent: state.intent,
         urgency: state.urgency,
         facts: orgInstructions
-          ? [...knownFacts(state), `Org instructions: ${orgInstructions}`]
-          : knownFacts(state),
+          ? [...knownFacts(state, cfg), ...knowledgeFacts, `Org instructions: ${orgInstructions}`]
+          : [...knownFacts(state, cfg), ...knowledgeFacts],
         transcript: transcript.map((m) => ({ role: m.role, content: m.content })),
       });
       salesSummary = ai.summary;
@@ -926,7 +994,7 @@ export async function handleMessage(params: {
         await mockAiProvider.generateSalesSummary({
           intent: state.intent,
           urgency: state.urgency,
-          facts: knownFacts(state),
+          facts: knownFacts(state, cfg),
           transcript: [],
         })
       ).summary;
@@ -946,7 +1014,7 @@ export async function handleMessage(params: {
         metadata: { conversationId: conversation.id, score, scoreReasons },
       });
     }
-    const intentInfo = state.intent ? INTENTS[state.intent] : undefined;
+    const intentInfo = state.intent ? intents[state.intent] : undefined;
     out.push(
       [
         state.urgency === "emergency"
@@ -955,7 +1023,7 @@ export async function handleMessage(params: {
             ? "✅ Done — your request is in and your inspection is on our calendar."
             : "✅ Done — your request is in and our team will reach out soon.",
         intentInfo ? `Recommended service: ${intentInfo.label} → ${intentInfo.service.replace(/-/g, " ")}.` : "",
-        "Remember: only a professional on-site inspection can confirm your roof's condition — nothing in this chat is a damage, pricing, or insurance determination.",
+        cfg.wrapUpNote,
       ]
         .filter(Boolean)
         .join("\n"),
@@ -1012,7 +1080,11 @@ async function sendBookingConfirmation(
   if (!state.appointmentId || !state.appointmentStart || state.consentGranted !== true) return null;
 
   const settings = await getOrgSettings(organizationId);
-  const businessName = settings.businessProfile.businessName ?? CLIENT.businessShortName;
+  const [orgRow] = await db
+    .select({ name: organizationsTable.name })
+    .from(organizationsTable)
+    .where(eq(organizationsTable.id, organizationId));
+  const businessName = settings.businessProfile.businessName ?? orgRow?.name ?? "Our team";
   const businessPhone = settings.businessProfile.phone ?? "";
 
   const windowLabel =
@@ -1041,7 +1113,7 @@ async function sendBookingConfirmation(
   const bodyLines = [
     `Hi ${state.firstName ?? "there"},`,
     "",
-    `Your roof inspection with ${businessName} is confirmed.`,
+    `Your inspection with ${businessName} is confirmed.`,
     `🗓 When: ${windowLabel}`,
     `🏠 Where: ${address}`,
     "",
@@ -1066,7 +1138,7 @@ async function sendBookingConfirmation(
     to = state.phone;
     providerResult = await providers.sms.send(
       to,
-      `${businessName}: your roof inspection is confirmed for ${windowLabel} at ${address}. ${reschedule}`,
+      `${businessName}: your inspection is confirmed for ${windowLabel} at ${address}. ${reschedule}`,
     );
   } else if (emailOk) {
     channel = "email";

@@ -50,6 +50,7 @@ vi.mock('@workspace/api-client-react', () => ({
 
 vi.mock('@/lib/analytics', () => ({
   useAnalytics: () => ({ track: vi.fn() }),
+  getVisitorContext: () => ({}),
   AnalyticsProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 

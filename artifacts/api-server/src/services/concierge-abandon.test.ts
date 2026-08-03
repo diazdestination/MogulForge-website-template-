@@ -285,7 +285,7 @@ describe("seeded abandoned-chat follow-up end to end", () => {
     const results = runs[0].actionResults;
     const sms = results.find((r) => r.type === "send_sms");
     expect(sms?.status).toBe("skipped");
-    expect(sms?.detail).toContain("no SMS consent");
+    expect(sms?.detail).toContain("no_sms_consent");
     const task = results.find((r) => r.type === "create_task");
     expect(task?.status).toBe("success");
 

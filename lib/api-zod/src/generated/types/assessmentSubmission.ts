@@ -8,6 +8,7 @@
 import type { AssessmentSubmissionConsent } from './assessmentSubmissionConsent';
 import type { AssessmentSubmissionIntent } from './assessmentSubmissionIntent';
 import type { Urgency } from './urgency';
+import type { WidgetAttribution } from './widgetAttribution';
 
 export interface AssessmentSubmission {
   /** @minLength 1 */
@@ -36,4 +37,8 @@ export interface AssessmentSubmission {
      * @items.pattern ^/objects/.+
      */
   photoPaths?: string[];
+  attribution?: WidgetAttribution;
+  /** First-party analytics visitor id; submitting contact details consents to linking prior session activity to the lead. */
+  anonymousId?: string;
+  sessionId?: string;
 }

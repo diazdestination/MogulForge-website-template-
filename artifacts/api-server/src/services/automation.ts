@@ -20,7 +20,20 @@ import {
 } from "@workspace/db";
 import { and, desc, eq, lte, sql } from "drizzle-orm";
 import { recordAudit } from "./audit";
+import {
+  autoEnrollLead,
+  executePlaybookStep,
+  OUTREACH_ACTIVE_STATUSES,
+  stopEnrollmentsForLead,
+} from "./playbooks";
+import { recordLeadOutcome } from "./playbook-learning";
 import { providers } from "./providers";
+import {
+  checkSendEligibility,
+  handleProviderFailure,
+  recordBlockedSend,
+  unsubscribeFooter,
+} from "./send-gate";
 import { getAppointmentReminderSettings, getOrgSettings } from "./settings";
 import {
   cleanupExpiredPreviousSecrets,
@@ -86,6 +99,41 @@ export async function runEvent(
   event: AutomationEventName,
   context: EventContext,
 ): Promise<void> {
+  // Closer Engine hooks: enroll new leads in an outreach playbook, and
+  // stop live enrollments the moment the lead converts or advances.
+  if (event === "lead.created" && context.leadId) {
+    await autoEnrollLead(organizationId, context.leadId);
+  } else if (event === "appointment.booked" && context.leadId) {
+    await stopEnrollmentsForLead(
+      organizationId,
+      context.leadId,
+      "inspection booked",
+      "completed",
+    );
+    // Learning loop: attribute the booking to the outreach touches.
+    await recordLeadOutcome(organizationId, context.leadId, "booked");
+  } else if (
+    (event === "lead.updated" || event === "lead.assigned") &&
+    context.leadId
+  ) {
+    const status = context.fields?.["lead.status"];
+    if (
+      typeof status === "string" &&
+      !OUTREACH_ACTIVE_STATUSES.includes(status as never)
+    ) {
+      await stopEnrollmentsForLead(
+        organizationId,
+        context.leadId,
+        `lead moved to ${status}`,
+        "completed",
+      );
+    }
+    // Learning loop: terminal stages close each touch's outcome chain.
+    if (status === "won" || status === "lost") {
+      await recordLeadOutcome(organizationId, context.leadId, status);
+    }
+  }
+
   const rules = await db
     .select()
     .from(automationsTable)
@@ -173,63 +221,126 @@ async function executeAction(
     });
 
   switch (action.type) {
-    case "send_email": {
-      const rendered = await renderTemplate(organizationId, action, context);
-      if (!rendered.contact?.email) {
-        return {
-          type: action.type,
-          status: "skipped",
-          detail: "no contact email",
-        };
-      }
-      const res = await providers.email.send(
-        rendered.contact.email,
-        rendered.subject ?? `${CLIENT.businessShortName} update`,
-        rendered.body,
-      );
-      await audit({
-        provider: res.provider,
-        to: rendered.contact.email,
-        mock: res.provider.startsWith("mock-"),
-      });
-      return {
-        type: action.type,
-        status: "success",
-        detail: `${res.provider}:${res.id}`,
-      };
-    }
-    case "send_sms": {
-      const rendered = await renderTemplate(organizationId, action, context);
-      if (!rendered.contact?.phone) {
-        return {
-          type: action.type,
-          status: "skipped",
-          detail: "no contact phone",
-        };
-      }
-      // Consent gate: latest SMS consent record must be granted.
-      const consented = await hasSmsConsent(
+    case "playbook_step": {
+      const result = await executePlaybookStep(
         organizationId,
-        rendered.contact.id,
+        action.params as { enrollmentId?: string; stepIndex?: number },
       );
-      if (!consented) {
-        await audit({
-          blocked: "no_sms_consent",
-          contactId: rendered.contact.id,
+      await audit(result);
+      return { type: action.type, ...result };
+    }
+    case "send_email":
+    case "send_sms": {
+      const channel = action.type === "send_email" ? "email" : "sms";
+      const rendered = await renderTemplate(organizationId, action, context);
+      if (!rendered.contact) {
+        return { type: action.type, status: "skipped", detail: "no contact" };
+      }
+      const contact = rendered.contact;
+      // Unified pre-send gate: DNC, suppressions, consent, quiet hours, caps.
+      const gate = await checkSendEligibility({
+        organizationId,
+        contact,
+        channel,
+        kind: "outreach",
+      });
+      if (!gate.ok) {
+        if (gate.outcome === "deferred") {
+          // Quiet hours / frequency cap: re-queue this exact action for the
+          // next allowed window instead of dropping it.
+          await db.insert(scheduledActionsTable).values({
+            organizationId,
+            action,
+            context: { ...context },
+            runAt: gate.resumeAt,
+          });
+          await audit({
+            deferred: gate.reason,
+            resumeAt: gate.resumeAt.toISOString(),
+            contactId: contact.id,
+          });
+          await recordBlockedSend({
+            organizationId,
+            channel,
+            reason: gate.reason,
+            outcome: "deferred",
+            source: "automation",
+            leadId: context.leadId ?? null,
+            contactId: contact.id,
+            resumeAt: gate.resumeAt,
+          });
+          return {
+            type: action.type,
+            status: "skipped",
+            detail: `deferred: ${gate.reason} until ${gate.resumeAt.toISOString()}`,
+          };
+        }
+        await audit({ blocked: gate.reason, contactId: contact.id });
+        await recordBlockedSend({
+          organizationId,
+          channel,
+          reason: gate.reason,
+          outcome: "blocked",
+          source: "automation",
+          leadId: context.leadId ?? null,
+          contactId: contact.id,
         });
         return {
           type: action.type,
           status: "skipped",
-          detail: "blocked: no SMS consent",
+          detail: `blocked: ${gate.reason}`,
         };
       }
-      const res = await providers.sms.send(
-        rendered.contact.phone,
-        rendered.body,
-      );
+      let res: { id: string; provider: string };
+      try {
+        res =
+          channel === "email"
+            ? await providers.email.send(
+                contact.email!,
+                rendered.subject ?? `${CLIENT.businessShortName} update`,
+                rendered.body + unsubscribeFooter(organizationId, contact.id),
+              )
+            : await providers.sms.send(contact.phone!, rendered.body);
+      } catch (err) {
+        // Permanently bad address → suppress so nothing retries it.
+        const suppressed = await handleProviderFailure({
+          organizationId,
+          channel,
+          address: channel === "email" ? contact.email! : contact.phone!,
+          err,
+          source: "automation",
+        });
+        if (!suppressed) throw err;
+        await audit({ blocked: `suppressed:${suppressed}`, contactId: contact.id });
+        await recordBlockedSend({
+          organizationId,
+          channel,
+          reason: `suppressed:${suppressed}`,
+          outcome: "blocked",
+          source: "automation",
+          leadId: context.leadId ?? null,
+          contactId: contact.id,
+        });
+        return {
+          type: action.type,
+          status: "skipped",
+          detail: `provider rejected address (${suppressed})`,
+        };
+      }
+      // Count this touch toward the contact's frequency cap.
+      if (context.leadId) {
+        await db.insert(activitiesTable).values({
+          organizationId,
+          leadId: context.leadId,
+          contactId: contact.id,
+          type: "automation_message_sent",
+          title: `Automation ${channel === "email" ? "email" : "text"} sent`,
+          metadata: { automationId, channel, provider: res.provider },
+        });
+      }
       await audit({
         provider: res.provider,
-        to: rendered.contact.phone,
+        to: channel === "email" ? contact.email : contact.phone,
         mock: res.provider.startsWith("mock-"),
       });
       return {
@@ -447,6 +558,7 @@ async function executeAction(
           email: contactsTable.email,
           phone: contactsTable.phone,
           preferredContactMethod: contactsTable.preferredContactMethod,
+          doNotContact: contactsTable.doNotContact,
         })
         .from(contactsTable)
         .where(
@@ -512,10 +624,25 @@ async function executeAction(
           : rawPreference === "text" || rawPreference === "sms"
             ? "sms"
             : null;
-      const smsAllowed = Boolean(
-        contact.phone && (await hasSmsConsent(organizationId, contact.id)),
-      );
-      const emailAllowed = Boolean(contact.email);
+      // Transactional gate: DNC + suppression list + SMS consent (no quiet
+      // hours — a reminder about an appointment the homeowner booked is
+      // expected and time-sensitive).
+      const smsAllowed = (
+        await checkSendEligibility({
+          organizationId,
+          contact,
+          channel: "sms",
+          kind: "transactional",
+        })
+      ).ok;
+      const emailAllowed = (
+        await checkSendEligibility({
+          organizationId,
+          contact,
+          channel: "email",
+          kind: "transactional",
+        })
+      ).ok;
       let channel: "sms" | "email" | null = null;
       if (preference === "email") {
         channel = emailAllowed ? "email" : smsAllowed ? "sms" : null;
@@ -630,22 +757,6 @@ export async function cancelScheduledFollowups(
 
 /** Context event marker used to find/cancel pending appointment reminders. */
 export const APPOINTMENT_REMINDER_EVENT = "appointment.reminder";
-async function hasSmsConsent(organizationId: string, contactId: string) {
-  const [latest] = await db
-    .select({ granted: consentRecordsTable.granted })
-    .from(consentRecordsTable)
-    .where(
-      and(
-        eq(consentRecordsTable.organizationId, organizationId),
-        eq(consentRecordsTable.contactId, contactId),
-        eq(consentRecordsTable.channel, "sms"),
-      ),
-    )
-    .orderBy(desc(consentRecordsTable.recordedAt))
-    .limit(1);
-  return latest?.granted === true;
-}
-
 async function renderTemplate(
   organizationId: string,
   action: AutomationAction,
@@ -680,6 +791,7 @@ async function renderTemplate(
     firstName: string;
     email: string | null;
     phone: string | null;
+    doNotContact: boolean;
   } | null = null;
   let contactId = context.contactId;
   if (!contactId && context.leadId) {
@@ -701,6 +813,7 @@ async function renderTemplate(
         firstName: contactsTable.firstName,
         email: contactsTable.email,
         phone: contactsTable.phone,
+        doNotContact: contactsTable.doNotContact,
       })
       .from(contactsTable)
       .where(
@@ -767,6 +880,23 @@ async function processDueScheduledActions(organizationId?: string): Promise<void
     )
     .limit(20);
   for (const item of due) {
+    // Atomically CLAIM the row before executing: bump attempts guarded by a
+    // compare-and-set on (status='pending', attempts unchanged). A concurrent
+    // worker or overlapping tick loses the CAS and skips the row, so each
+    // scheduled send executes at most once — no double sends, no duplicate
+    // deferral re-queues, and frequency caps stay accurate.
+    const [claimed] = await db
+      .update(scheduledActionsTable)
+      .set({ attempts: item.attempts + 1 })
+      .where(
+        and(
+          eq(scheduledActionsTable.id, item.id),
+          eq(scheduledActionsTable.status, "pending"),
+          eq(scheduledActionsTable.attempts, item.attempts),
+        ),
+      )
+      .returning({ id: scheduledActionsTable.id });
+    if (!claimed) continue; // another worker took it
     try {
       await executeAction(
         item.organizationId,
@@ -776,7 +906,7 @@ async function processDueScheduledActions(organizationId?: string): Promise<void
       );
       await db
         .update(scheduledActionsTable)
-        .set({ status: "done", attempts: item.attempts + 1 })
+        .set({ status: "done" })
         .where(eq(scheduledActionsTable.id, item.id));
     } catch (err) {
       const attempts = item.attempts + 1;
@@ -784,7 +914,6 @@ async function processDueScheduledActions(organizationId?: string): Promise<void
         .update(scheduledActionsTable)
         .set({
           status: attempts >= 3 ? "failed" : "pending",
-          attempts,
           lastError: err instanceof Error ? err.message : "failed",
           runAt: new Date(Date.now() + 5 * 60_000),
         })
@@ -805,7 +934,22 @@ async function processDueScheduledActions(organizationId?: string): Promise<void
  *   pending actions or processing each other's webhook deliveries.
  */
 export async function processScheduledWork(organizationId?: string): Promise<void> {
+  // Throttled reactivation campaigns release their next batch of leads into
+  // playbook sequences before due steps are executed. Dynamic import avoids a
+  // static circular dependency (reactivation → playbooks → automation types).
+  await runStage("reactivation-drain", async () => {
+    const { drainReactivationCampaigns } = await import("./reactivation");
+    await drainReactivationCampaigns(organizationId);
+  });
   await runStage("scheduled-actions", () => processDueScheduledActions(organizationId));
+  // Throttled reactivation campaigns release their next batch of leads into
+  // playbook sequences (their first step becomes due on a later tick).
+  // Dynamic import avoids a static circular dependency (reactivation →
+  // playbooks → automation).
+  await runStage("reactivation-drain", async () => {
+    const { drainReactivationCampaigns } = await import("./reactivation");
+    await drainReactivationCampaigns(organizationId);
+  });
   // Skip the remaining global housekeeping stages when scoped to a single org
   // (i.e. in tests). Those stages are not org-specific and would interfere with
   // parallel test workers that own different portions of the shared database.

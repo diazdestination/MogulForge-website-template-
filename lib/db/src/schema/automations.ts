@@ -26,7 +26,8 @@ export interface AutomationAction {
     | "call_webhook"
     | "add_tag"
     | "schedule_followup"
-    | "appointment_reminder";
+    | "appointment_reminder"
+    | "playbook_step";
   /** Action-specific params, e.g. { templateId }, { status }, { assignedUserId }, { tagId }, { delayMinutes, action } */
   params: Record<string, unknown>;
 }

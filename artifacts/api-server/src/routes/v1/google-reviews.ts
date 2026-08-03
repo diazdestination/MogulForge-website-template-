@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 
 import { rateLimit } from "../../lib/rateLimit";
-import { getDefaultOrganization } from "../../services/org";
+import { resolvePublicOrg } from "../../middlewares/publicOrg";
 import { getOrgSettings } from "../../services/settings";
 
 const router: IRouter = Router();
@@ -19,7 +19,9 @@ interface CacheEntry {
   fetchedAt: number;
 }
 
-let reviewCache: CacheEntry | null = null;
+// Keyed by organization id — public routes are multi-tenant (installation
+// keys), so one org's reviews must never be served for another.
+const reviewCache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 /**
@@ -33,7 +35,7 @@ let reviewCacheJustCleared = false;
 
 /** Invalidate the in-memory reviews cache (call after org settings change). */
 export function clearReviewCache(): void {
-  reviewCache = null;
+  reviewCache.clear();
   reviewCacheJustCleared = true;
 }
 
@@ -96,13 +98,16 @@ async function fetchFromGooglePlaces(
 router.get(
   "/public/google-reviews",
   rateLimit({ windowMs: 60_000, max: 60, key: "google-reviews" }),
+  resolvePublicOrg(),
   async (req: Request, res: Response): Promise<void> => {
     const now = Date.now();
+    const orgId = req.publicOrg!.id;
 
     // Serve fresh cache if available
-    if (reviewCache && now - reviewCache.fetchedAt < CACHE_TTL_MS) {
+    const cached = reviewCache.get(orgId);
+    if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
       res.setHeader("Cache-Control", "public, max-age=3600");
-      res.json({ reviews: reviewCache.reviews, isFallback: false });
+      res.json({ reviews: cached.reviews, isFallback: false });
       return;
     }
 
@@ -114,9 +119,8 @@ router.get(
     let orgHasGoogleReviewsEntry = false;
 
     try {
-      const org = await getDefaultOrganization();
-      if (org) {
-        const settings = await getOrgSettings(org.id);
+      {
+        const settings = await getOrgSettings(orgId);
         if (settings.googleReviews != null) {
           orgHasGoogleReviewsEntry = true;
           apiKey = settings.googleReviews.apiKey?.trim() || undefined;
@@ -142,7 +146,7 @@ router.get(
 
     try {
       const result = await fetchFromGooglePlaces(apiKey, placeId);
-      reviewCache = { reviews: result, fetchedAt: now };
+      reviewCache.set(orgId, { reviews: result, fetchedAt: now });
       // If credentials were just changed the admin cleared the cache.  Send
       // no-cache for this one response so browsers and CDNs are forced to
       // revalidate on the next request rather than serving the old data for
@@ -157,9 +161,10 @@ router.get(
     } catch (err) {
       req.log.error({ err }, "Failed to fetch Google reviews");
       // Serve stale cache rather than nothing; flag as fallback since data may be outdated
-      if (reviewCache) {
+      const stale = reviewCache.get(orgId);
+      if (stale) {
         res.setHeader("Cache-Control", "public, max-age=300");
-        res.json({ reviews: reviewCache.reviews, isFallback: true });
+        res.json({ reviews: stale.reviews, isFallback: true });
         return;
       }
       res.setHeader("Cache-Control", "no-store");

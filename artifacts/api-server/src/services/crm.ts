@@ -389,7 +389,14 @@ export async function createLead(
 
   const [row] = await db
     .insert(leadsTable)
-    .values({ ...input, organizationId })
+    .values({
+      // API-created leads still record how they entered the system and keep
+      // latestSource in sync with the original source by default.
+      creationMethod: "api",
+      latestSource: input.latestSource ?? input.source ?? null,
+      ...input,
+      organizationId,
+    })
     .returning();
   return row;
 }

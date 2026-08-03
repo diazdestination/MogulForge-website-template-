@@ -497,7 +497,9 @@ else
   fi
 
   # The file must have been git-committed (git log shows the commit message)
-  if git -C "$CLONE8" log --oneline | grep -q "activate sync-from-upstream"; then
+  # No pipe to `grep -q`: under pipefail, grep exiting early can SIGPIPE git
+  # and fail the pipeline even on a match.
+  if [[ "$(git -C "$CLONE8" log --oneline)" == *"activate sync-from-upstream"* ]]; then
     _pass "install-sync-workflow.sh committed the workflow file with correct message"
   else
     _fail "Expected commit message 'activate sync-from-upstream' not found in git log"

@@ -33,6 +33,8 @@ tags:
   - name: settings
   - name: templates
   - name: automations
+  - name: playbooks
+  - name: reactivation
   - name: webhooks
   - name: tags
   - name: api-keys
@@ -307,6 +309,412 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/installation:
+    get:
+      operationId: getInstallation
+      tags: [installation]
+      summary: Current public installation key and authorized domains (admin only)
+      responses:
+        "200":
+          description: Installation configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Installation"
+  /v1/installation/checks:
+    post:
+      operationId: checkInstallation
+      tags: [installation]
+      summary: Test a domain for a correct closer.js installation (admin only)
+      description: Server-side fetch of the domain's homepage to detect the snippet and verify the key. The latest result per domain is kept and returned on GET /v1/installation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckInstallationInput"
+      responses:
+        "200":
+          description: Check result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstallationCheckResult"
+        "400":
+          description: Invalid domain
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/knowledge:
+    get:
+      operationId: listKnowledgeEntries
+      tags: [knowledge]
+      summary: List the org's knowledge-base entries (admin only)
+      responses:
+        "200":
+          description: Knowledge entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/KnowledgeEntry"
+    post:
+      operationId: createKnowledgeEntry
+      tags: [knowledge]
+      summary: Add a knowledge-base entry (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeEntryInput"
+      responses:
+        "201":
+          description: Created entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeEntry"
+        "400":
+          description: Invalid entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/knowledge/{id}:
+    patch:
+      operationId: updateKnowledgeEntry
+      tags: [knowledge]
+      summary: Update a knowledge-base entry (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeEntryPatch"
+      responses:
+        "200":
+          description: Updated entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeEntry"
+        "400":
+          description: Invalid entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      operationId: deleteKnowledgeEntry
+      tags: [knowledge]
+      summary: Delete a knowledge-base entry (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/forms:
+    get:
+      operationId: listForms
+      tags: [forms]
+      summary: List the org's smart forms (admin only)
+      responses:
+        "200":
+          description: Forms
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SmartForm"
+    post:
+      operationId: createForm
+      tags: [forms]
+      summary: Create a smart form (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmartFormInput"
+      responses:
+        "201":
+          description: Created form
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmartForm"
+        "400":
+          description: Invalid form definition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/forms/{id}:
+    patch:
+      operationId: updateForm
+      tags: [forms]
+      summary: Update a smart form (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmartFormPatch"
+      responses:
+        "200":
+          description: Updated form
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SmartForm"
+        "400":
+          description: Invalid form definition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      operationId: deleteForm
+      tags: [forms]
+      summary: Delete a smart form; forms that already have submissions are archived instead (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Outcome
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [outcome]
+                properties:
+                  outcome:
+                    type: string
+                    enum: [deleted, archived]
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/forms/{id}/submissions:
+    get:
+      operationId: listFormSubmissions
+      tags: [forms]
+      summary: List submissions of a smart form (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Submissions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FormSubmissionRecord"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/forms/{id}/share:
+    get:
+      operationId: getFormShareAssets
+      tags: [forms]
+      summary: Hosted page URL, embed snippet, and QR code (SVG) for a smart form (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Share assets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FormShareAssets"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/public/forms/{slug}:
+    get:
+      operationId: getPublicForm
+      tags: [public]
+      summary: Published form definition for the embed runtime and hosted pages
+      security: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Public form definition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicFormDefinition"
+        "404":
+          description: Not found or unpublished
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/public/forms/{slug}/submissions:
+    post:
+      operationId: submitPublicForm
+      tags: [public]
+      summary: Submit a smart form (public, rate limited)
+      security: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitFormBody"
+      responses:
+        "201":
+          description: Submission result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitFormResult"
+        "400":
+          description: Invalid submission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: Form not found or unpublished
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/installation/rotate:
+    post:
+      operationId: rotateInstallationKey
+      tags: [installation]
+      summary: Rotate the public installation key — the old key stops working immediately (admin only)
+      responses:
+        "201":
+          description: The freshly issued key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InstallationKey"
+  /v1/installation/domains:
+    post:
+      operationId: addAuthorizedDomain
+      tags: [installation]
+      summary: Authorize a website domain for the installation key (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddAuthorizedDomainInput"
+      responses:
+        "201":
+          description: The authorized domain (normalized)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthorizedDomain"
+        "400":
+          description: Invalid domain
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/installation/domains/{id}:
+    delete:
+      operationId: removeAuthorizedDomain
+      tags: [installation]
+      summary: Remove an authorized domain (admin only)
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "204":
+          description: Removed
         "404":
           description: Not found
           content:
@@ -823,6 +1231,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Lead"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/leads/{id}/behavior:
+    get:
+      operationId: getLeadBehavior
+      tags: [leads]
+      description: Attribution details plus the linked visitor's website behavior summary. Anonymous visitors are never linked, so unlinked leads return an empty behavior shape.
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Behavior summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeadBehaviorSummary"
         "404":
           description: Not found
           content:
@@ -1816,6 +2244,59 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PublicSiteConfig"
+  /v1/public/widget-config:
+    get:
+      operationId: getPublicWidgetConfig
+      tags: [public]
+      summary: Public widget configuration for the embeddable closer.js script
+      description: Enabled modules and appearance for the requesting installation key's organization. Contains no secrets. Unauthenticated (installation-key scoped).
+      responses:
+        "200":
+          description: Widget configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicWidgetConfig"
+  /v1/public/widget-leads:
+    post:
+      operationId: submitWidgetLead
+      tags: [public]
+      summary: Create a CRM lead from the embeddable lead-capture widget
+      description: Creates an org-scoped contact and lead with marketing attribution. Unauthenticated (installation-key scoped, rate limited).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WidgetLeadSubmission"
+      responses:
+        "201":
+          description: Lead created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WidgetLeadResult"
+        "400":
+          description: Invalid submission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/public/widget-heartbeat:
+    post:
+      operationId: recordWidgetHeartbeat
+      tags: [public]
+      summary: Widget heartbeat from the embed script
+      description: Sent by closer.js after a successful init so the admin panel can show last session, version and connection health. Unauthenticated (installation-key scoped, rate limited).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WidgetHeartbeat"
+      responses:
+        "204":
+          description: Recorded
   /v1/public/google-reviews:
     get:
       operationId: getPublicGoogleReviews
@@ -2104,6 +2585,446 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/AutomationRun"
+  /v1/playbooks:
+    get:
+      operationId: listPlaybooks
+      tags: [playbooks]
+      summary: List outreach playbooks
+      responses:
+        "200":
+          description: Playbooks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Playbook"
+    post:
+      operationId: createPlaybook
+      tags: [playbooks]
+      summary: Create an outreach playbook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlaybookInput"
+      responses:
+        "201":
+          description: Created playbook
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Playbook"
+        "400":
+          description: Invalid playbook
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/playbooks/{id}:
+    patch:
+      operationId: updatePlaybook
+      tags: [playbooks]
+      summary: Update an outreach playbook
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlaybookUpdate"
+      responses:
+        "200":
+          description: Updated playbook
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Playbook"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/leads/{id}/enrollment:
+    get:
+      operationId: getLeadEnrollment
+      tags: [playbooks]
+      summary: Get the lead's playbook enrollment (live or most recent)
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Enrollment, or null when the lead was never enrolled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeadEnrollmentEnvelope"
+  /v1/enrollments/{id}/pause:
+    post:
+      operationId: pauseEnrollment
+      tags: [playbooks]
+      summary: Pause a live playbook enrollment
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Paused enrollment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaybookEnrollment"
+        "404":
+          description: Not found or not pausable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/enrollments/{id}/resume:
+    post:
+      operationId: resumeEnrollment
+      tags: [playbooks]
+      summary: Resume a paused playbook enrollment
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Resumed enrollment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaybookEnrollment"
+        "404":
+          description: Not found or not resumable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/enrollments/{id}/skip:
+    post:
+      operationId: skipEnrollmentStep
+      tags: [playbooks]
+      summary: Skip the enrollment's current step
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Enrollment advanced past the current step
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlaybookEnrollment"
+        "404":
+          description: Not found or not skippable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/lead-imports:
+    get:
+      operationId: listLeadImports
+      tags: [reactivation]
+      summary: List past CSV lead imports
+      responses:
+        "200":
+          description: Imports, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LeadImport"
+    post:
+      operationId: importLeadsCsv
+      tags: [reactivation]
+      summary: Import leads from a CSV file
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LeadImportRequest"
+      responses:
+        "201":
+          description: Import summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeadImport"
+        "400":
+          description: Invalid file or mapping
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/reactivation/segments:
+    get:
+      operationId: listReactivationSegments
+      tags: [reactivation]
+      summary: Recommended win-back segments with live counts
+      responses:
+        "200":
+          description: Segment presets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReactivationSegmentPreset"
+  /v1/reactivation/segments/preview:
+    post:
+      operationId: previewReactivationSegment
+      tags: [reactivation]
+      summary: Count and sample leads matching a segment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReactivationSegmentPreviewRequest"
+      responses:
+        "200":
+          description: Segment preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReactivationSegmentPreview"
+  /v1/reactivation/campaigns:
+    get:
+      operationId: listReactivationCampaigns
+      tags: [reactivation]
+      summary: List reactivation campaigns
+      responses:
+        "200":
+          description: Campaigns, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReactivationCampaign"
+    post:
+      operationId: createReactivationCampaign
+      tags: [reactivation]
+      summary: Create a draft reactivation campaign
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReactivationCampaignInput"
+      responses:
+        "201":
+          description: Created campaign
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReactivationCampaign"
+        "400":
+          description: Invalid campaign
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/reactivation/campaigns/preview-outreach:
+    post:
+      operationId: previewReactivationOutreach
+      tags: [reactivation]
+      summary: Generate sample first-step outreach for a segment + playbook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReactivationOutreachPreviewRequest"
+      responses:
+        "200":
+          description: Sample messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReactivationOutreachPreview"
+        "400":
+          description: No playbook or no matching leads
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/reactivation/campaigns/{id}:
+    get:
+      operationId: getReactivationCampaignReport
+      tags: [reactivation]
+      summary: Campaign detail with progress and outcome report
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Campaign report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReactivationCampaignReport"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/reactivation/campaigns/{id}/launch:
+    post:
+      operationId: launchReactivationCampaign
+      tags: [reactivation]
+      summary: Snapshot the segment and start throttled enrollment
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Running campaign
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReactivationCampaign"
+        "400":
+          description: Not launchable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/reactivation/campaigns/{id}/pause:
+    post:
+      operationId: pauseReactivationCampaign
+      tags: [reactivation]
+      summary: Pause enrollment of new leads
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Paused campaign
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReactivationCampaign"
+        "400":
+          description: Not pausable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/reactivation/campaigns/{id}/resume:
+    post:
+      operationId: resumeReactivationCampaign
+      tags: [reactivation]
+      summary: Resume a paused campaign
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Running campaign
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReactivationCampaign"
+        "400":
+          description: Not resumable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/reactivation/campaigns/{id}/cancel:
+    post:
+      operationId: cancelReactivationCampaign
+      tags: [reactivation]
+      summary: Cancel the campaign and stop its sequences
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: Cancelled campaign
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReactivationCampaign"
+        "400":
+          description: Not cancellable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/playbook-insights:
+    get:
+      operationId: getPlaybookInsights
+      tags: [playbooks]
+      summary: Conversion Insights — funnel by playbook/step/variant/channel plus engine decisions and lift
+      responses:
+        "200":
+          description: Conversion insights
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversionInsights"
+  /v1/leads/{id}/next-action:
+    get:
+      operationId: getLeadNextAction
+      tags: [playbooks]
+      summary: Next best action for a lead, with an AI draft when it's a message
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "200":
+          description: The recommended next action
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NextBestAction"
+        "404":
+          description: Lead not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/leads/{id}/next-action/feedback:
+    post:
+      operationId: recordNextActionFeedback
+      tags: [playbooks]
+      summary: Record how the rep responded to a recommendation (sent, edited, snoozed, dismissed)
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NextActionFeedbackInput"
+      responses:
+        "204":
+          description: Feedback recorded
+        "404":
+          description: Lead not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/next-actions:
+    get:
+      operationId: listTodayActions
+      tags: [playbooks]
+      summary: Prioritized "today's actions" queue across all workable leads
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Actions ordered by conversion impact (no drafts)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/NextBestAction"
   /v1/webhooks:
     get:
       operationId: listWebhooks
@@ -3038,6 +3959,9 @@ components:
           type: [string, "null"]
         preferredContactMethod:
           type: [string, "null"]
+        doNotContact:
+          type: boolean
+          description: Hard do-not-contact flag; blocks ALL automated outreach on every channel.
         createdAt:
           type: string
           format: date-time
@@ -3059,6 +3983,8 @@ components:
           type: string
         preferredContactMethod:
           type: string
+        doNotContact:
+          type: boolean
     ContactUpdate:
       type: object
       properties:
@@ -3073,6 +3999,8 @@ components:
           type: [string, "null"]
         preferredContactMethod:
           type: [string, "null"]
+        doNotContact:
+          type: boolean
     Property:
       type: object
       required:
@@ -3198,6 +4126,19 @@ components:
           type: [string, "null"]
         sourceDetail:
           type: [string, "null"]
+        latestSource:
+          type: [string, "null"]
+          description: Most recent marketing source; `source` keeps the original.
+        campaign:
+          type: [string, "null"]
+          description: utm_campaign of the first touch.
+        landingPage:
+          type: [string, "null"]
+        referrer:
+          type: [string, "null"]
+        creationMethod:
+          type: [string, "null"]
+          description: How the lead entered the system (assessment, widget, form, concierge, api).
         contactName:
           type: [string, "null"]
           description: Convenience display name of the linked contact (list endpoints only).
@@ -3839,6 +4780,13 @@ components:
             type: string
             pattern: "^/objects/.+"
           description: Object paths of damage photos uploaded via the public upload endpoint.
+        attribution:
+          $ref: "#/components/schemas/WidgetAttribution"
+        anonymousId:
+          type: string
+          description: First-party analytics visitor id; submitting contact details consents to linking prior session activity to the lead.
+        sessionId:
+          type: string
     UploadUrlRequest:
       type: object
       required: [name, size, contentType]
@@ -3907,6 +4855,11 @@ components:
           type: string
         intent:
           type: string
+        attribution:
+          $ref: "#/components/schemas/WidgetAttribution"
+        anonymousId:
+          type: string
+          description: First-party analytics visitor id; linked to the lead only once the visitor identifies themselves in the chat.
     ConciergeMessageRequest:
       type: object
       required: [content]
@@ -4180,6 +5133,18 @@ components:
           oneOf:
             - $ref: "#/components/schemas/GoogleReviewsConfig"
             - type: "null"
+        widget:
+          oneOf:
+            - $ref: "#/components/schemas/WidgetSettings"
+            - type: "null"
+        concierge:
+          oneOf:
+            - $ref: "#/components/schemas/ConciergeSettings"
+            - type: "null"
+        sendingHours:
+          oneOf:
+            - $ref: "#/components/schemas/SendingHoursSettings"
+            - type: "null"
         updatedAt:
           type: string
     OrgSettingsInput:
@@ -4213,6 +5178,493 @@ components:
           description: Fallback email address for portal message notifications when the assigned rep has no valid email.
         googleReviews:
           $ref: "#/components/schemas/GoogleReviewsConfig"
+        widget:
+          $ref: "#/components/schemas/WidgetSettings"
+        concierge:
+          $ref: "#/components/schemas/ConciergeSettings"
+        sendingHours:
+          $ref: "#/components/schemas/SendingHoursSettings"
+    SendingHoursSettings:
+      type: object
+      description: Quiet hours and frequency caps for automated outreach (playbooks + automation email/SMS). Quiet hours defer sends into the next allowed window; they never drop them.
+      required: [quietHoursEnabled, timezone, startHour, endHour, days, maxTouchesPerDay]
+      properties:
+        quietHoursEnabled:
+          type: boolean
+          description: Master switch. Off means historical behavior (send any time).
+        timezone:
+          type: string
+          description: IANA timezone the sending window is evaluated in.
+        startHour:
+          type: integer
+          description: Inclusive start hour (0-23) of the allowed sending window.
+        endHour:
+          type: integer
+          description: Exclusive end hour (1-24) of the allowed sending window.
+        days:
+          type: array
+          items:
+            type: string
+          description: Days sends are allowed (Mon..Sun).
+        maxTouchesPerDay:
+          type: integer
+          description: Max automated touches per contact per rolling 24h (0 = unlimited).
+    WidgetSettings:
+      type: object
+      description: Embeddable website widget (closer.js) modules & appearance. All values are public.
+      required: [leadCaptureEnabled]
+      properties:
+        leadCaptureEnabled:
+          type: boolean
+          description: Master switch for the lead-capture launcher module.
+        primaryColor:
+          type: string
+          description: CSS color for the launcher & accents.
+        position:
+          type: string
+          enum: [left, right]
+          description: Corner the launcher docks to.
+        greeting:
+          type: string
+          description: Greeting shown at the top of the open panel.
+        buttonLabel:
+          type: string
+          description: Label on the launcher button.
+        testMode:
+          type: boolean
+          description: When true the widget is hidden from normal visitors and only renders for pages loaded with the mf_preview=1 flag.
+        conciergeEnabled:
+          type: boolean
+          description: AI concierge chat module (uses the org knowledge base + intake flow).
+    ConciergeIntent:
+      type: object
+      description: One selectable concierge intent. Array order controls keyword-match priority and quick-reply order.
+      required: [key, label, service, points, reason, urgency, triage, keywords]
+      properties:
+        key:
+          type: string
+          description: Stable key stored on conversations/leads (e.g. "leak").
+        label:
+          type: string
+          description: Quick-reply label shown to visitors.
+        service:
+          type: string
+          description: CRM service slug recommended for this intent.
+        points:
+          type: number
+          description: Base lead-score points (0-100, clamped server-side).
+        reason:
+          type: string
+          description: Score-reason text shown to reps.
+        urgency:
+          type: string
+          enum: [normal, high, emergency]
+        triage:
+          type: boolean
+          description: Whether this intent runs the emergency triage question first.
+        keywords:
+          type: array
+          items:
+            type: string
+          description: Case-insensitive substrings that detect this intent in free text.
+    ConciergeSettings:
+      type: object
+      description: Org-configurable AI concierge behavior. Defaults preserve the original roofing behavior.
+      properties:
+        assistantName:
+          type: string
+        greeting:
+          type: string
+        intents:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConciergeIntent"
+        intakeDisclaimer:
+          type: string
+          description: Guardrail line sent when pricing/insurance/safety conclusions are asked.
+        emergencySafety:
+          type: string
+        emergencyEscalation:
+          type: string
+        unknownAnswerFallback:
+          type: string
+          description: Reply when a visitor asks something the knowledge base cannot answer.
+        wrapUpNote:
+          type: string
+    KnowledgeEntry:
+      type: object
+      description: One org knowledge-base fact grounding concierge answers and outreach drafting.
+      required: [id, category, title, content, source, isActive, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+        category:
+          type: string
+          enum: [company, service, service_area, hours, faq, financing, warranty, policy, escalation, disclaimer, brand_voice]
+        title:
+          type: string
+        content:
+          type: string
+        source:
+          type: string
+          description: Where this fact came from ("manual", "seed").
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+    KnowledgeEntryInput:
+      type: object
+      required: [category, title, content]
+      properties:
+        category:
+          type: string
+          enum: [company, service, service_area, hours, faq, financing, warranty, policy, escalation, disclaimer, brand_voice]
+        title:
+          type: string
+          minLength: 1
+        content:
+          type: string
+          minLength: 1
+        isActive:
+          type: boolean
+    KnowledgeEntryPatch:
+      type: object
+      properties:
+        category:
+          type: string
+          enum: [company, service, service_area, hours, faq, financing, warranty, policy, escalation, disclaimer, brand_voice]
+        title:
+          type: string
+          minLength: 1
+        content:
+          type: string
+          minLength: 1
+        isActive:
+          type: boolean
+    SmartForm:
+      type: object
+      description: An org-configurable multi-step form/assessment. Steps and settings are validated server-side.
+      required: [id, slug, name, status, steps, settings, isSeeded, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [draft, published, archived]
+        isSeeded:
+          type: boolean
+          description: True for system-seeded forms (e.g. the default assessment).
+        steps:
+          type: array
+          description: Ordered steps; each has key, title, fields, and an optional showIf branching rule.
+          items:
+            type: object
+            additionalProperties: true
+        settings:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+    SmartFormInput:
+      type: object
+      required: [name, slug, steps]
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [draft, published]
+        steps:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        settings:
+          type: object
+          additionalProperties: true
+    SmartFormPatch:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [draft, published, archived]
+        steps:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        settings:
+          type: object
+          additionalProperties: true
+    FormSubmissionRecord:
+      type: object
+      required: [id, formId, answers, attribution, dedupeOutcome, createdAt]
+      properties:
+        id:
+          type: string
+        formId:
+          type: string
+        leadId:
+          type: string
+          nullable: true
+        contactId:
+          type: string
+          nullable: true
+        answers:
+          type: object
+          additionalProperties: true
+        attribution:
+          type: object
+          additionalProperties: true
+        dedupeOutcome:
+          type: string
+          enum: [new_lead, existing_lead]
+        createdAt:
+          type: string
+    FormShareAssets:
+      type: object
+      required: [hostedUrl, embedSnippet, qrSvg]
+      properties:
+        hostedUrl:
+          type: string
+          description: Public hosted page URL for the form.
+        embedSnippet:
+          type: string
+          description: Script tag to paste into a third-party site.
+        qrSvg:
+          type: string
+          description: QR code for the hosted URL, as inline SVG markup.
+    PublicFormDefinition:
+      type: object
+      required: [slug, name, steps, settings]
+      properties:
+        slug:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        steps:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        settings:
+          type: object
+          additionalProperties: true
+    SubmitFormBody:
+      type: object
+      required: [answers]
+      properties:
+        answers:
+          type: object
+          description: Raw answers keyed by field key; validated server-side against the definition.
+          additionalProperties: true
+        attribution:
+          type: object
+        anonymousId:
+          type: string
+          description: First-party analytics visitor id; submitting the form consents to linking prior session activity to the lead.
+        sessionId:
+          type: string
+          description: First-party analytics session id for the submitting tab session.
+        source:
+          type: string
+          description: Lead source override recorded on the lead.
+    SubmitFormResult:
+      type: object
+      required: [submissionId, leadId, deduped, score, scoreReasons, urgency, guidance]
+      properties:
+        submissionId:
+          type: string
+        leadId:
+          type: string
+        deduped:
+          type: boolean
+        score:
+          type: number
+        scoreReasons:
+          type: array
+          items:
+            type: string
+        urgency:
+          type: string
+          enum: [low, normal, high, emergency]
+        guidance:
+          type: string
+    PublicWidgetConfig:
+      type: object
+      description: Public widget configuration served to the embed script. Never contains secrets.
+      required: [modules, appearance]
+      properties:
+        modules:
+          type: object
+          required: [leadCapture, concierge]
+          properties:
+            leadCapture:
+              type: boolean
+            concierge:
+              type: boolean
+        concierge:
+          type: object
+          description: Public concierge display config (name + greeting) for the chat module.
+          required: [assistantName, greeting]
+          properties:
+            assistantName:
+              type: string
+            greeting:
+              type: string
+        appearance:
+          type: object
+          required: [primaryColor, position, greeting, buttonLabel]
+          properties:
+            primaryColor:
+              type: string
+            position:
+              type: string
+              enum: [left, right]
+            greeting:
+              type: string
+            buttonLabel:
+              type: string
+        businessName:
+          type: string
+          nullable: true
+        testMode:
+          type: boolean
+          description: True while the org is previewing; the widget only renders with the preview flag.
+    LeadBehaviorSummary:
+      type: object
+      required: [linked, attribution, behavior]
+      properties:
+        linked:
+          type: boolean
+          description: Whether the lead has an associated website visitor id.
+        attribution:
+          type: object
+          required: []
+          properties:
+            source:
+              type: [string, "null"]
+            latestSource:
+              type: [string, "null"]
+            campaign:
+              type: [string, "null"]
+            landingPage:
+              type: [string, "null"]
+            referrer:
+              type: [string, "null"]
+            creationMethod:
+              type: [string, "null"]
+        behavior:
+          type: object
+          required:
+            [pageViews, sessions, activeDays, topPages, highIntentPages, toolsStarted, abandonedForms, highlights]
+          properties:
+            pageViews:
+              type: integer
+            sessions:
+              type: integer
+            activeDays:
+              type: integer
+            firstSeenAt:
+              type: [string, "null"]
+            lastSeenAt:
+              type: [string, "null"]
+            topPages:
+              type: array
+              items:
+                type: object
+                required: [path, views]
+                properties:
+                  path:
+                    type: string
+                  views:
+                    type: integer
+            highIntentPages:
+              type: array
+              items:
+                type: string
+            toolsStarted:
+              type: array
+              items:
+                type: string
+            abandonedForms:
+              type: integer
+            highlights:
+              type: array
+              items:
+                type: string
+    WidgetAttribution:
+      type: object
+      description: Best-effort marketing attribution captured by the embed script on the host page.
+      properties:
+        landingPage:
+          type: string
+          description: URL of the page the widget was submitted from.
+        referrer:
+          type: string
+        utmSource:
+          type: string
+        utmMedium:
+          type: string
+        utmCampaign:
+          type: string
+        utmTerm:
+          type: string
+        utmContent:
+          type: string
+    WidgetLeadSubmission:
+      type: object
+      required: [firstName, phone]
+      properties:
+        firstName:
+          type: string
+          minLength: 1
+        lastName:
+          type: string
+        phone:
+          type: string
+          minLength: 7
+        email:
+          type: string
+        message:
+          type: string
+          description: Free-form note from the visitor.
+        attribution:
+          $ref: "#/components/schemas/WidgetAttribution"
+        anonymousId:
+          type: string
+          description: First-party analytics visitor id from the embed script.
+    WidgetLeadResult:
+      type: object
+      required: [leadId]
+      properties:
+        leadId:
+          type: string
+          format: uuid
     GoogleReviewsConfig:
       type: object
       description: Google Business Profile connection for the public reviews widget.
@@ -4325,6 +5777,95 @@ components:
           $ref: "#/components/schemas/UserRole"
         isActive:
           type: boolean
+    Installation:
+      type: object
+      required: [publicKey, createdAt, domains, checks]
+      properties:
+        publicKey:
+          type: string
+          description: Browser-safe public key embedded in the website snippet.
+        createdAt:
+          type: string
+        domains:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthorizedDomain"
+        heartbeat:
+          $ref: "#/components/schemas/InstallationHeartbeat"
+        checks:
+          type: array
+          description: Latest "test installation" result per checked domain.
+          items:
+            $ref: "#/components/schemas/InstallationCheckResult"
+    InstallationHeartbeat:
+      type: object
+      description: Last widget session recorded for the active installation key. Omitted until the first heartbeat arrives.
+      required: [lastSeenAt]
+      properties:
+        lastSeenAt:
+          type: string
+        version:
+          type: string
+          nullable: true
+          description: closer.js version reported by the last heartbeat.
+        host:
+          type: string
+          nullable: true
+          description: Page hostname reported by the last heartbeat.
+    WidgetHeartbeat:
+      type: object
+      properties:
+        version:
+          type: string
+        host:
+          type: string
+    CheckInstallationInput:
+      type: object
+      required: [domain]
+      properties:
+        domain:
+          type: string
+          description: Domain to check, e.g. example.com.
+    InstallationCheckResult:
+      type: object
+      required: [domain, status, detail, checkedAt]
+      properties:
+        domain:
+          type: string
+        status:
+          type: string
+          enum: [installed, wrong_key, misconfigured, domain_not_authorized, not_detected, unreachable]
+        detail:
+          type: string
+          description: Human-readable explanation of the status.
+        checkedAt:
+          type: string
+    InstallationKey:
+      type: object
+      required: [publicKey, createdAt]
+      properties:
+        publicKey:
+          type: string
+        createdAt:
+          type: string
+    AuthorizedDomain:
+      type: object
+      required: [id, domain, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        domain:
+          type: string
+        createdAt:
+          type: string
+    AddAuthorizedDomainInput:
+      type: object
+      required: [domain]
+      properties:
+        domain:
+          type: string
+          description: Domain, URL, wildcard ("*.example.com"), or localhost.
     ApiKey:
       type: object
       required: [id, name, prefix, role, isActive, createdAt]
@@ -4605,6 +6146,479 @@ components:
             $ref: "#/components/schemas/AutomationActionConfig"
         isActive:
           type: boolean
+    PlaybookStep:
+      type: object
+      required: [channel, delayMinutes, prompt]
+      properties:
+        channel:
+          type: string
+          enum: [email, sms]
+        delayMinutes:
+          type: number
+        subject:
+          type: string
+        prompt:
+          type: string
+        variants:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlaybookStepVariant"
+        pinnedVariant:
+          type: string
+    PlaybookStepVariant:
+      type: object
+      required: [key, prompt]
+      properties:
+        key:
+          type: string
+        prompt:
+          type: string
+        subject:
+          type: string
+    InsightsFunnelRow:
+      type: object
+      required: [playbookId, playbookName, stepIndex, variantKey, channel, sent, replied, booked, won, lost]
+      properties:
+        playbookId:
+          type: string
+          format: uuid
+        playbookName:
+          type: string
+        stepIndex:
+          type: number
+        variantKey:
+          type: string
+        channel:
+          type: string
+        sent:
+          type: number
+        replied:
+          type: number
+        booked:
+          type: number
+        won:
+          type: number
+        lost:
+          type: number
+    InsightsDecision:
+      type: object
+      required: [kind, explanation, createdAt]
+      properties:
+        kind:
+          type: string
+        stepIndex:
+          type: number
+          nullable: true
+        explanation:
+          type: string
+        createdAt:
+          type: string
+    ConversionInsights:
+      type: object
+      required: [funnel, decisions, baselineReplyRate, engineReplyRate, totalTouches]
+      properties:
+        funnel:
+          type: array
+          items:
+            $ref: "#/components/schemas/InsightsFunnelRow"
+        decisions:
+          type: array
+          items:
+            $ref: "#/components/schemas/InsightsDecision"
+        baselineReplyRate:
+          type: number
+        engineReplyRate:
+          type: number
+        liftPercent:
+          type: number
+          nullable: true
+        totalTouches:
+          type: number
+    PlaybookRules:
+      type: object
+      properties:
+        minScore:
+          type: number
+          nullable: true
+        urgencies:
+          type: array
+          items:
+            type: string
+        serviceTypes:
+          type: array
+          items:
+            type: string
+        sources:
+          type: array
+          items:
+            type: string
+    Playbook:
+      type: object
+      required: [id, name, isActive, enrollmentRules, steps]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        seedKey:
+          type: string
+          nullable: true
+        isActive:
+          type: boolean
+        enrollmentRules:
+          $ref: "#/components/schemas/PlaybookRules"
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlaybookStep"
+        updatedAt:
+          type: string
+    PlaybookInput:
+      type: object
+      required: [name, steps]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        isActive:
+          type: boolean
+        enrollmentRules:
+          $ref: "#/components/schemas/PlaybookRules"
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlaybookStep"
+    PlaybookUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        isActive:
+          type: boolean
+        enrollmentRules:
+          $ref: "#/components/schemas/PlaybookRules"
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlaybookStep"
+    EnrollmentHistoryEntry:
+      type: object
+      required: [at, kind]
+      properties:
+        at:
+          type: string
+        kind:
+          type: string
+        stepIndex:
+          type: number
+        channel:
+          type: string
+        detail:
+          type: string
+    PlaybookEnrollment:
+      type: object
+      required: [id, playbookId, leadId, status, currentStep, history]
+      properties:
+        id:
+          type: string
+          format: uuid
+        playbookId:
+          type: string
+          format: uuid
+        leadId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [active, paused, completed, stopped]
+        currentStep:
+          type: number
+        pauseReason:
+          type: string
+          nullable: true
+        nextRunAt:
+          type: string
+          nullable: true
+        history:
+          type: array
+          items:
+            $ref: "#/components/schemas/EnrollmentHistoryEntry"
+        playbookName:
+          type: string
+        totalSteps:
+          type: number
+    LeadEnrollmentEnvelope:
+      type: object
+      required: [enrollment]
+      properties:
+        enrollment:
+          allOf:
+            - $ref: "#/components/schemas/PlaybookEnrollment"
+          nullable: true
+    LeadImportRequest:
+      type: object
+      required: [csv, mapping]
+      properties:
+        csv:
+          type: string
+        mapping:
+          type: object
+          description: Map of import field name to 0-based CSV column index.
+          additionalProperties:
+            type: number
+        fileName:
+          type: string
+        hasHeader:
+          type: boolean
+        defaultStatus:
+          type: string
+        defaultSource:
+          type: string
+    LeadImport:
+      type: object
+      required: [id, totalRows, imported, duplicates, skipped, suppressed, errors, createdAt]
+      properties:
+        id:
+          type: string
+        fileName:
+          type: string
+          nullable: true
+        totalRows:
+          type: number
+        imported:
+          type: number
+        duplicates:
+          type: number
+        skipped:
+          type: number
+        suppressed:
+          type: number
+        errors:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+    ReactivationSegment:
+      type: object
+      properties:
+        statuses:
+          type: array
+          items:
+            type: string
+        minAgeDays:
+          type: number
+          nullable: true
+        inactiveDays:
+          type: number
+          nullable: true
+        sources:
+          type: array
+          items:
+            type: string
+    ReactivationSegmentPreviewRequest:
+      type: object
+      properties:
+        segment:
+          $ref: "#/components/schemas/ReactivationSegment"
+    ReactivationOutreachPreviewRequest:
+      type: object
+      required: [playbookId]
+      properties:
+        playbookId:
+          type: string
+        segment:
+          $ref: "#/components/schemas/ReactivationSegment"
+    ReactivationSegmentPreset:
+      type: object
+      required: [key, name, description, segment, count]
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        segment:
+          $ref: "#/components/schemas/ReactivationSegment"
+        count:
+          type: number
+    ReactivationSegmentPreview:
+      type: object
+      required: [segment, count, sample]
+      properties:
+        segment:
+          $ref: "#/components/schemas/ReactivationSegment"
+        count:
+          type: number
+        sample:
+          type: array
+          items:
+            type: object
+            required: [id, status, createdAt]
+            properties:
+              id:
+                type: string
+              contactName:
+                type: string
+                nullable: true
+              status:
+                type: string
+              source:
+                type: string
+                nullable: true
+              createdAt:
+                type: string
+    ReactivationCampaignInput:
+      type: object
+      required: [name, playbookId]
+      properties:
+        name:
+          type: string
+        playbookId:
+          type: string
+        segment:
+          $ref: "#/components/schemas/ReactivationSegment"
+        ratePerHour:
+          type: number
+    ReactivationCampaign:
+      type: object
+      required: [id, name, playbookId, segment, status, ratePerHour, totalLeads, createdAt]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        playbookId:
+          type: string
+        playbookName:
+          type: string
+          nullable: true
+        segment:
+          $ref: "#/components/schemas/ReactivationSegment"
+        status:
+          type: string
+          enum: [draft, running, paused, completed, cancelled]
+        ratePerHour:
+          type: number
+        totalLeads:
+          type: number
+        enrolledCount:
+          type: number
+        launchedAt:
+          type: string
+          nullable: true
+        completedAt:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+    ReactivationOutreachPreview:
+      type: object
+      required: [samples]
+      properties:
+        samples:
+          type: array
+          items:
+            type: object
+            required: [leadId, channel, body]
+            properties:
+              leadId:
+                type: string
+              contactName:
+                type: string
+                nullable: true
+              channel:
+                type: string
+              subject:
+                type: string
+                nullable: true
+              body:
+                type: string
+    ReactivationCampaignReport:
+      type: object
+      required: [campaign, enrolled, pending, skipped, contacted, replied, booked, recoveredRevenueCents]
+      properties:
+        campaign:
+          $ref: "#/components/schemas/ReactivationCampaign"
+        enrolled:
+          type: number
+        pending:
+          type: number
+        skipped:
+          type: number
+        contacted:
+          type: number
+        replied:
+          type: number
+        booked:
+          type: number
+        recoveredRevenueCents:
+          type: number
+    NextActionDraft:
+      type: object
+      required: [body, provider]
+      properties:
+        subject:
+          type: string
+        body:
+          type: string
+        provider:
+          type: string
+    NextBestAction:
+      type: object
+      required: [leadId, actionType, title, reasons, priority, leadStatus, score]
+      properties:
+        leadId:
+          type: string
+          format: uuid
+        actionType:
+          type: string
+          enum:
+            [
+              reply_portal_message,
+              call_now,
+              send_message,
+              follow_up_estimate,
+              schedule_follow_up,
+              none,
+            ]
+        title:
+          type: string
+        reasons:
+          type: array
+          items:
+            type: string
+        priority:
+          type: number
+        channel:
+          type: string
+          enum: [email, sms, phone]
+        draft:
+          $ref: "#/components/schemas/NextActionDraft"
+        leadSummary:
+          type: string
+          nullable: true
+        leadStatus:
+          type: string
+        contactName:
+          type: string
+          nullable: true
+        score:
+          type: integer
+    NextActionFeedbackInput:
+      type: object
+      required: [actionType, response]
+      properties:
+        actionType:
+          type: string
+        response:
+          type: string
+          enum: [sent, edited, snoozed, dismissed]
+        snoozeHours:
+          type: integer
     AutomationActionResult:
       type: object
       required: [type, status]

@@ -5,7 +5,7 @@ import {
   useSendConciergeMessage,
   type ConciergeReply,
 } from '@workspace/api-client-react';
-import { useAnalytics } from '@/lib/analytics';
+import { getVisitorContext, useAnalytics } from '@/lib/analytics';
 import { useSpeechInput, useSpeechOutput } from '@/hooks/use-voice';
 import {
   Bot,
@@ -92,7 +92,7 @@ export default function ConciergePage() {
     startedRef.current = true;
     track('ai_conversation_started', { intent: intentHint ?? 'unknown' });
     startConversation.mutate(
-      { data: { source: 'public-site', path: '/concierge', intent: intentHint } },
+      { data: { source: 'public-site', path: '/concierge', intent: intentHint, ...getVisitorContext() } },
       {
         onSuccess: applyReply,
         onError: () => setError('The concierge is unavailable right now. Please call us instead.'),

@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSubmitAssessment, requestPublicUploadUrl, AssessmentSubmissionIntent, Urgency, AssessmentResult } from '@workspace/api-client-react';
-import { useAnalytics } from '@/lib/analytics';
+import { getVisitorContext, useAnalytics } from '@/lib/analytics';
 import { Seo, breadcrumbJsonLd } from '@/lib/seo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -204,7 +204,8 @@ export default function AssessmentPage() {
           smsGranted: data.consentGranted,
           emailGranted: data.consentGranted,
           disclosureVersion: "2026-08-01.v1"
-        }
+        },
+        ...getVisitorContext()
       }
     }, {
       onSuccess: (res) => {

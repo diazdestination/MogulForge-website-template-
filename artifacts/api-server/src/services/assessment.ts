@@ -14,6 +14,12 @@ import type { z } from "zod";
 
 import { DEFAULT_LEAD_SCORING, type LeadScoringSettings } from "@workspace/db";
 
+import {
+  behaviorSignals,
+  buildTouch,
+  clampScore,
+  leadAttributionColumns,
+} from "./attribution";
 import { providers } from "./providers";
 import { getLeadScoring } from "./settings";
 
@@ -116,7 +122,17 @@ export async function captureAssessment(params: {
 }) {
   const { organizationId, submission } = params;
   const weights = await getLeadScoring(organizationId);
-  const { score, scoreReasons, urgency } = scoreSubmission(submission, weights);
+  const scored = scoreSubmission(submission, weights);
+  const { urgency } = scored;
+  // Behavior signals from the visitor's prior session activity (empty when
+  // the submission carried no analytics id — anonymous isolation).
+  const behavior = await behaviorSignals(
+    organizationId,
+    submission.anonymousId,
+    weights,
+  );
+  const score = clampScore(scored.score + behavior.points);
+  const scoreReasons = [...scored.scoreReasons, ...behavior.reasons];
   const ai = await providers.ai.summarizeLead({
     description: submission.description,
     intent: submission.intent,
@@ -148,11 +164,12 @@ export async function captureAssessment(params: {
       })
       .returning();
 
-    const touch = {
+    const source = submission.source ?? "public-site";
+    const touch = buildTouch({
       channel: "web",
-      source: submission.source ?? "public-site",
-      at: new Date().toISOString(),
-    };
+      source,
+      attribution: submission.attribution,
+    });
 
     const [lead] = await tx
       .insert(leadsTable)
@@ -163,12 +180,15 @@ export async function captureAssessment(params: {
         status: "new",
         urgency,
         serviceType: submission.intent,
-        source: submission.source ?? "public-site",
         score,
         scoreReasons,
         summary: ai.summary,
-        firstTouch: touch,
-        lastTouch: touch,
+        ...leadAttributionColumns({
+          source,
+          creationMethod: "assessment",
+          touch,
+          anonymousId: submission.anonymousId,
+        }),
       })
       .returning();
 

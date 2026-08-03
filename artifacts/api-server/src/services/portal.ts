@@ -31,6 +31,8 @@ import {
   notifyAssignedRepOfPortalMessage,
   notifyAssignedRepOfPortalPhotos,
 } from "./portal-message-email";
+import { stopEnrollmentsForLead } from "./playbooks";
+import { recordLeadOutcome } from "./playbook-learning";
 import { isSafeMailbox, providers } from "./providers";
 
 const CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -756,6 +758,19 @@ export async function postPortalMessage(params: {
       metadata: { source: "homeowner-portal" },
     })
     .returning({ id: activitiesTable.id });
+
+  // A homeowner reply means a human should take over: pause any live
+  // Closer Engine outreach so the lead isn't hit with automated touches
+  // mid-conversation. Never throws.
+  await stopEnrollmentsForLead(
+    params.session.organizationId,
+    lead.id,
+    "lead replied via portal",
+    "paused",
+  );
+  // Learning loop: credit the reply back to the outreach touches that
+  // preceded it (variant/step attribution). Never throws.
+  await recordLeadOutcome(params.session.organizationId, lead.id, "replied");
 
   // Notify the assigned rep (if any) so the message doesn't sit unread.
   // Rapid consecutive messages are debounced to at most one email per quiet

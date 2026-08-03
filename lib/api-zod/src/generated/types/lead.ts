@@ -25,6 +25,25 @@ export interface Lead {
   /** @nullable */
   sourceDetail?: string | null;
   /**
+     * Most recent marketing source; `source` keeps the original.
+     * @nullable
+     */
+  latestSource?: string | null;
+  /**
+     * utm_campaign of the first touch.
+     * @nullable
+     */
+  campaign?: string | null;
+  /** @nullable */
+  landingPage?: string | null;
+  /** @nullable */
+  referrer?: string | null;
+  /**
+     * How the lead entered the system (assessment, widget, form, concierge, api).
+     * @nullable
+     */
+  creationMethod?: string | null;
+  /**
      * Convenience display name of the linked contact (list endpoints only).
      * @nullable
      */

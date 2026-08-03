@@ -5,7 +5,8 @@ import {
   ensureDefaultAutomations,
   startAutomationScheduler,
 } from "./services/automation";
-import { ensureDefaultServiceAreas } from "./services/settings";
+import { ensureDefaultServiceAreas, getOrgSettings } from "./services/settings";
+import { ensureInstallation } from "./services/installation";
 
 const rawPort = process.env["PORT"];
 
@@ -37,6 +38,18 @@ app.listen(port, (err) => {
     for (const org of orgs) {
       await ensureDefaultAutomations(org.id);
       await ensureDefaultServiceAreas(org.id);
+      // Seed an installation key + authorized domains so the existing
+      // first-party website keeps working when it starts sending its key.
+      const settings = await getOrgSettings(org.id).catch(() => null);
+      const seedDomains = ["localhost"];
+      const site = settings?.businessProfile?.website;
+      if (site) seedDomains.push(site);
+      if (process.env.REPLIT_DEV_DOMAIN) {
+        seedDomains.push(process.env.REPLIT_DEV_DOMAIN);
+      }
+      await ensureInstallation(org.id, seedDomains).catch((err) =>
+        logger.error({ err, orgId: org.id }, "Seeding installation failed"),
+      );
     }
   })().catch((err) =>
     logger.error({ err }, "Seeding default automations / service areas failed"),

@@ -1,7 +1,12 @@
 import {
   DEFAULT_APPOINTMENT_REMINDER,
+  DEFAULT_CONCIERGE_SETTINGS,
+  type ConciergeIntent,
+  type ConciergeSettings,
   DEFAULT_INSPECTION_AVAILABILITY,
   DEFAULT_LEAD_SCORING,
+  DEFAULT_SENDING_HOURS,
+  type SendingHoursSettings,
   db,
   orgSettingsTable,
   type AppointmentReminderSettings,
@@ -167,6 +172,8 @@ export async function updateOrgSettings(
       | "appointmentReminder"
       | "securityAlertsAcknowledgedAt"
       | "googleReviews"
+      | "widget"
+      | "sendingHours"
     >
   >,
 ): Promise<OrgSettings> {
@@ -181,6 +188,24 @@ export async function updateOrgSettings(
     .where(eq(orgSettingsTable.organizationId, organizationId))
     .returning();
   return row;
+}
+
+/** Effective sending safeguards: org override merged over defaults. */
+export async function getSendingHours(
+  organizationId: string,
+): Promise<SendingHoursSettings> {
+  const settings = await getOrgSettings(organizationId);
+  const merged = { ...DEFAULT_SENDING_HOURS, ...(settings.sendingHours ?? {}) };
+  if (!isValidTimezone(merged.timezone)) {
+    merged.timezone = DEFAULT_SENDING_HOURS.timezone;
+  }
+  merged.startHour = Math.min(Math.max(Math.trunc(merged.startHour), 0), 23);
+  merged.endHour = Math.min(Math.max(Math.trunc(merged.endHour), merged.startHour + 1), 24);
+  merged.maxTouchesPerDay = Math.max(Math.trunc(merged.maxTouchesPerDay), 0);
+  if (!Array.isArray(merged.days) || merged.days.length === 0) {
+    merged.days = DEFAULT_SENDING_HOURS.days;
+  }
+  return merged;
 }
 
 /** Effective scoring weights: org override merged over defaults. */
@@ -273,6 +298,63 @@ export async function getAppointmentReminderSettings(
       DEFAULT_APPOINTMENT_REMINDER.emailSubject,
     ),
     emailBody: nonEmpty(merged.emailBody, DEFAULT_APPOINTMENT_REMINDER.emailBody),
+  };
+}
+
+/**
+ * Effective concierge behavior: org override merged over the built-in
+ * (Painless roofing) defaults, sanitized so the state machine always has a
+ * usable intent catalog and non-empty copy.
+ */
+export async function getConciergeSettings(
+  organizationId: string,
+): Promise<Required<ConciergeSettings>> {
+  const settings = await getOrgSettings(organizationId);
+  const raw = settings.concierge ?? {};
+  const nonEmpty = (value: string | undefined, fallback: string) =>
+    typeof value === "string" && value.trim().length > 0 ? value : fallback;
+  const seen = new Set<string>();
+  const intents = (Array.isArray(raw.intents) ? raw.intents : [])
+    .filter(
+      (i): i is ConciergeIntent =>
+        !!i &&
+        typeof i.key === "string" &&
+        i.key.trim().length > 0 &&
+        typeof i.label === "string" &&
+        i.label.trim().length > 0 &&
+        typeof i.service === "string" &&
+        i.service.trim().length > 0,
+    )
+    .filter((i) => (seen.has(i.key) ? false : (seen.add(i.key), true)))
+    .map((i) => ({
+      key: i.key.trim(),
+      label: i.label.trim(),
+      service: i.service.trim(),
+      points: Number.isFinite(i.points) ? Math.max(0, Math.min(100, i.points)) : 10,
+      reason: nonEmpty(i.reason, `${i.label.trim()} requested`),
+      urgency: (["normal", "high", "emergency"] as const).includes(i.urgency)
+        ? i.urgency
+        : "normal",
+      triage: Boolean(i.triage),
+      keywords: (Array.isArray(i.keywords) ? i.keywords : [])
+        .filter((k): k is string => typeof k === "string" && k.trim().length > 0)
+        .map((k) => k.trim().toLowerCase()),
+    }));
+  return {
+    assistantName: nonEmpty(raw.assistantName, DEFAULT_CONCIERGE_SETTINGS.assistantName),
+    greeting: nonEmpty(raw.greeting, DEFAULT_CONCIERGE_SETTINGS.greeting),
+    intents: intents.length > 0 ? intents : DEFAULT_CONCIERGE_SETTINGS.intents,
+    intakeDisclaimer: nonEmpty(raw.intakeDisclaimer, DEFAULT_CONCIERGE_SETTINGS.intakeDisclaimer),
+    emergencySafety: nonEmpty(raw.emergencySafety, DEFAULT_CONCIERGE_SETTINGS.emergencySafety),
+    emergencyEscalation: nonEmpty(
+      raw.emergencyEscalation,
+      DEFAULT_CONCIERGE_SETTINGS.emergencyEscalation,
+    ),
+    unknownAnswerFallback: nonEmpty(
+      raw.unknownAnswerFallback,
+      DEFAULT_CONCIERGE_SETTINGS.unknownAnswerFallback,
+    ),
+    wrapUpNote: nonEmpty(raw.wrapUpNote, DEFAULT_CONCIERGE_SETTINGS.wrapUpNote),
   };
 }
 

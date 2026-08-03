@@ -7,10 +7,14 @@
  */
 import type { AppointmentReminderSettings } from './appointmentReminderSettings';
 import type { BusinessProfile } from './businessProfile';
+import type { ConciergeSettings } from './conciergeSettings';
+import type { GoogleReviewsConfig } from './googleReviewsConfig';
 import type { InspectionAvailabilitySettings } from './inspectionAvailabilitySettings';
 import type { LeadScoringSettings } from './leadScoringSettings';
+import type { SendingHoursSettings } from './sendingHoursSettings';
 import type { ServiceAreaEntry } from './serviceAreaEntry';
 import type { ServiceEntry } from './serviceEntry';
+import type { WidgetSettings } from './widgetSettings';
 
 export interface OrgSettingsInput {
   businessProfile?: BusinessProfile;
@@ -25,4 +29,8 @@ export interface OrgSettingsInput {
   securityAlertsAcknowledgedAt?: string;
   /** Fallback email address for portal message notifications when the assigned rep has no valid email. */
   fallbackNotificationInbox?: string | null;
+  googleReviews?: GoogleReviewsConfig;
+  widget?: WidgetSettings;
+  concierge?: ConciergeSettings;
+  sendingHours?: SendingHoursSettings;
 }

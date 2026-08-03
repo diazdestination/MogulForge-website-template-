@@ -11,7 +11,11 @@ globalThis.require = createRequire(import.meta.url);
 const artifactDir = path.dirname(fileURLToPath(import.meta.url));
 
 async function buildAll() {
-  const distDir = path.resolve(artifactDir, "dist");
+  // API_SERVER_OUT_DIR lets callers (e.g. the smoke check) build into an
+  // isolated directory so concurrent builds never clobber the live dist/.
+  const distDir = process.env.API_SERVER_OUT_DIR
+    ? path.resolve(process.env.API_SERVER_OUT_DIR)
+    : path.resolve(artifactDir, "dist");
   await rm(distDir, { recursive: true, force: true });
 
   await esbuild({

@@ -4,7 +4,7 @@ import { Clock, Facebook, Loader2, MapPin, Phone, Send } from 'lucide-react';
 import { useSubmitAssessment } from '@workspace/api-client-react';
 import { Seo, breadcrumbJsonLd, localBusinessJsonLd } from '@/lib/seo';
 import { Breadcrumbs, PageHero } from '@/components/page-blocks';
-import { useAnalytics } from '@/lib/analytics';
+import { getVisitorContext, useAnalytics } from '@/lib/analytics';
 import { useBusiness } from '@/lib/site-config';
 
 export default function ContactPage() {
@@ -43,6 +43,7 @@ export default function ContactPage() {
             emailGranted: Boolean(form.email.trim()),
             disclosureVersion: '2026-08-contact-page',
           },
+          ...getVisitorContext(),
         },
       },
       {

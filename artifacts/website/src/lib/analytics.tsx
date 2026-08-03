@@ -78,6 +78,49 @@ function attributionProperties(): Record<string, unknown> {
   return props;
 }
 
+/**
+ * Visitor identifiers + first-touch attribution for lead submissions.
+ * Passing these along when the visitor identifies themselves lets the CRM
+ * link prior session behavior to the lead (consent by identification).
+ */
+export function getVisitorContext(): {
+  anonymousId?: string;
+  sessionId?: string;
+  attribution?: {
+    landingPage?: string;
+    referrer?: string;
+    utmSource?: string;
+    utmMedium?: string;
+    utmCampaign?: string;
+    utmTerm?: string;
+    utmContent?: string;
+  };
+} {
+  try {
+    const first = readStored('painless_first_touch');
+    const attribution = first
+      ? {
+          landingPage: first.landingPage || undefined,
+          referrer: first.referrer || undefined,
+          utmSource: first.utm.utm_source,
+          utmMedium: first.utm.utm_medium,
+          utmCampaign: first.utm.utm_campaign,
+          utmTerm: first.utm.utm_term,
+          utmContent: first.utm.utm_content,
+        }
+      : undefined;
+    const anonymousId = getOrSetId('painless_anon_id', localStorage);
+    const sessionId = getOrSetId('painless_session_id', sessionStorage);
+    return {
+      anonymousId: anonymousId !== 'unknown' ? anonymousId : undefined,
+      sessionId: sessionId !== 'unknown' ? sessionId : undefined,
+      attribution,
+    };
+  } catch {
+    return {};
+  }
+}
+
 export function useAnalytics() {
   const mutation = useTrackAnalyticsEvent();
 

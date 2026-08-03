@@ -17,4 +17,5 @@ export interface ContactUpdate {
   phone?: string | null;
   /** @nullable */
   preferredContactMethod?: string | null;
+  doNotContact?: boolean;
 }

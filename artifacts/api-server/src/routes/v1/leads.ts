@@ -9,6 +9,7 @@ import {
   UpdateLeadBody,
   RequestPublicUploadUrlBody,
   DeleteLeadPhotoBody,
+  RecordNextActionFeedbackBody,
 } from "@workspace/api-zod";
 import {
   ObjectStorageService,
@@ -17,10 +18,16 @@ import { validatePhotoObjects } from "../../lib/photoValidation";
 import { Router, type IRouter, type Request, type Response } from "express";
 
 import { requireMember } from "../../middlewares/requireMember";
+import { getLeadBehaviorSummary } from "../../services/attribution";
 import { recordAudit } from "../../services/audit";
 import { emitAutomationEvent } from "../../services/automation";
 import { listLeadConversations } from "../../services/concierge";
 import * as crm from "../../services/crm";
+import {
+  getNextBestAction,
+  listTodayActions,
+  recordActionFeedback,
+} from "../../services/next-best-action";
 import { notifyHomeownerOfTeamReply } from "../../services/portal-message-email";
 import {
   gmailEmailProvider,
@@ -217,6 +224,62 @@ router.delete(
   },
 );
 
+// ---------- next-best-action copilot ----------
+
+router.get(
+  "/next-actions",
+  requireMember("crm.read"),
+  async (req: Request, res: Response): Promise<void> => {
+    res.json(
+      await listTodayActions(req.member!.organizationId, {
+        limit:
+          typeof req.query.limit === "string" && req.query.limit !== ""
+            ? Number(req.query.limit)
+            : undefined,
+      }),
+    );
+  },
+);
+
+router.get(
+  "/leads/:id/next-action",
+  requireMember("crm.read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const action = await getNextBestAction(
+      req.member!.organizationId,
+      String(req.params.id),
+    );
+    if (!action) {
+      res.status(404).json({ error: "Lead not found" });
+      return;
+    }
+    res.json(action);
+  },
+);
+
+router.post(
+  "/leads/:id/next-action/feedback",
+  requireMember("crm.write"),
+  async (req: Request, res: Response): Promise<void> => {
+    const parsed = RecordNextActionFeedbackBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid feedback" });
+      return;
+    }
+    const ok = await recordActionFeedback(
+      req.member!.organizationId,
+      String(req.params.id),
+      req.member!.user.id,
+      parsed.data,
+    );
+    if (!ok) {
+      res.status(404).json({ error: "Lead not found" });
+      return;
+    }
+    res.status(204).end();
+  },
+);
+
 router.get(
   "/leads/:id",
   requireMember("crm.read"),
@@ -227,6 +290,22 @@ router.get(
       return;
     }
     res.json(lead);
+  },
+);
+
+router.get(
+  "/leads/:id/behavior",
+  requireMember("crm.read"),
+  async (req: Request, res: Response): Promise<void> => {
+    const summary = await getLeadBehaviorSummary(
+      req.member!.organizationId,
+      String(req.params.id),
+    );
+    if (!summary) {
+      res.status(404).json({ error: "Lead not found" });
+      return;
+    }
+    res.json(summary);
   },
 );
 

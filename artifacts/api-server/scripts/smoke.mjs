@@ -15,8 +15,13 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import net from "node:net";
-
 const artifactDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// Build into an isolated dir (NOT dist/): the dev workflow builds/serves the
+// real dist/, and a concurrent smoke build into the same folder can boot a
+// half-written bundle (observed as a SyntaxError mid-file at startup). It
+// must stay inside the artifact so external packages (zod, sharp, @resvg/*)
+// still resolve via node_modules; .smoke-dist is gitignored.
+const smokeDist = path.join(artifactDir, ".smoke-dist");
 const BOOT_TIMEOUT_MS = 30_000;
 
 function run(cmd, args, opts = {}) {
@@ -42,12 +47,14 @@ function getFreePort() {
 
 async function main() {
   console.log("[smoke] building api-server bundle...");
-  await run("node", ["./build.mjs"]);
+  await run("node", ["./build.mjs"], {
+    env: { ...process.env, API_SERVER_OUT_DIR: smokeDist },
+  });
 
   const port = await getFreePort();
   console.log(`[smoke] starting server on port ${port}...`);
 
-  const server = spawn("node", ["--enable-source-maps", "./dist/index.mjs"], {
+  const server = spawn("node", ["--enable-source-maps", path.join(smokeDist, "index.mjs")], {
     cwd: artifactDir,
     env: { ...process.env, PORT: String(port), NODE_ENV: "test" },
     stdio: ["ignore", "inherit", "inherit"],

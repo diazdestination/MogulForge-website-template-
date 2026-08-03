@@ -78,11 +78,6 @@ export const LogoutBrowserSessionResponse = zod.void()
  */
 
 
-
-
-
-
-
 export const ExchangeMobileAuthorizationCodeBody = zod.object({
   "code": zod.string().min(1),
   "code_verifier": zod.string().min(1),
@@ -201,6 +196,321 @@ export const ResendInviteResponse = zod.object({
 
 
 /**
+ * @summary Current public installation key and authorized domains (admin only)
+ */
+export const GetInstallationResponse = zod.object({
+  "publicKey": zod.string().describe('Browser-safe public key embedded in the website snippet.'),
+  "createdAt": zod.string(),
+  "domains": zod.array(zod.object({
+  "id": zod.uuid(),
+  "domain": zod.string(),
+  "createdAt": zod.string()
+})),
+  "heartbeat": zod.object({
+  "lastSeenAt": zod.string(),
+  "version": zod.string().nullish().describe('closer.js version reported by the last heartbeat.'),
+  "host": zod.string().nullish().describe('Page hostname reported by the last heartbeat.')
+}).optional().describe('Last widget session recorded for the active installation key. Omitted until the first heartbeat arrives.'),
+  "checks": zod.array(zod.object({
+  "domain": zod.string(),
+  "status": zod.enum(['installed', 'wrong_key', 'misconfigured', 'domain_not_authorized', 'not_detected', 'unreachable']),
+  "detail": zod.string().describe('Human-readable explanation of the status.'),
+  "checkedAt": zod.string()
+})).describe('Latest \"test installation\" result per checked domain.')
+})
+
+
+/**
+ * Server-side fetch of the domain's homepage to detect the snippet and verify the key. The latest result per domain is kept and returned on GET /v1/installation.
+ * @summary Test a domain for a correct closer.js installation (admin only)
+ */
+export const CheckInstallationBody = zod.object({
+  "domain": zod.string().describe('Domain to check, e.g. example.com.')
+})
+
+export const CheckInstallationResponse = zod.object({
+  "domain": zod.string(),
+  "status": zod.enum(['installed', 'wrong_key', 'misconfigured', 'domain_not_authorized', 'not_detected', 'unreachable']),
+  "detail": zod.string().describe('Human-readable explanation of the status.'),
+  "checkedAt": zod.string()
+})
+
+
+/**
+ * @summary List the org's knowledge-base entries (admin only)
+ */
+export const ListKnowledgeEntriesResponseItem = zod.object({
+  "id": zod.string(),
+  "category": zod.enum(['company', 'service', 'service_area', 'hours', 'faq', 'financing', 'warranty', 'policy', 'escalation', 'disclaimer', 'brand_voice']),
+  "title": zod.string(),
+  "content": zod.string(),
+  "source": zod.string().describe('Where this fact came from (\"manual\", \"seed\").'),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}).describe('One org knowledge-base fact grounding concierge answers and outreach drafting.')
+export const ListKnowledgeEntriesResponse = zod.array(ListKnowledgeEntriesResponseItem)
+
+
+/**
+ * @summary Add a knowledge-base entry (admin only)
+ */
+
+
+export const CreateKnowledgeEntryBody = zod.object({
+  "category": zod.enum(['company', 'service', 'service_area', 'hours', 'faq', 'financing', 'warranty', 'policy', 'escalation', 'disclaimer', 'brand_voice']),
+  "title": zod.string().min(1),
+  "content": zod.string().min(1),
+  "isActive": zod.boolean().optional()
+})
+
+export const CreateKnowledgeEntryResponse = zod.object({
+  "id": zod.string(),
+  "category": zod.enum(['company', 'service', 'service_area', 'hours', 'faq', 'financing', 'warranty', 'policy', 'escalation', 'disclaimer', 'brand_voice']),
+  "title": zod.string(),
+  "content": zod.string(),
+  "source": zod.string().describe('Where this fact came from (\"manual\", \"seed\").'),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}).describe('One org knowledge-base fact grounding concierge answers and outreach drafting.')
+
+
+/**
+ * @summary Update a knowledge-base entry (admin only)
+ */
+export const UpdateKnowledgeEntryParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+
+export const UpdateKnowledgeEntryBody = zod.object({
+  "category": zod.enum(['company', 'service', 'service_area', 'hours', 'faq', 'financing', 'warranty', 'policy', 'escalation', 'disclaimer', 'brand_voice']).optional(),
+  "title": zod.string().min(1).optional(),
+  "content": zod.string().min(1).optional(),
+  "isActive": zod.boolean().optional()
+})
+
+export const UpdateKnowledgeEntryResponse = zod.object({
+  "id": zod.string(),
+  "category": zod.enum(['company', 'service', 'service_area', 'hours', 'faq', 'financing', 'warranty', 'policy', 'escalation', 'disclaimer', 'brand_voice']),
+  "title": zod.string(),
+  "content": zod.string(),
+  "source": zod.string().describe('Where this fact came from (\"manual\", \"seed\").'),
+  "isActive": zod.boolean(),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}).describe('One org knowledge-base fact grounding concierge answers and outreach drafting.')
+
+
+/**
+ * @summary Delete a knowledge-base entry (admin only)
+ */
+export const DeleteKnowledgeEntryParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const DeleteKnowledgeEntryResponse = zod.void()
+
+
+/**
+ * @summary List the org's smart forms (admin only)
+ */
+export const ListFormsResponseItem = zod.object({
+  "id": zod.string(),
+  "slug": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "status": zod.enum(['draft', 'published', 'archived']),
+  "isSeeded": zod.boolean().describe('True for system-seeded forms (e.g. the default assessment).'),
+  "steps": zod.array(zod.record(zod.string(), zod.unknown())).describe('Ordered steps; each has key, title, fields, and an optional showIf branching rule.'),
+  "settings": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}).describe('An org-configurable multi-step form\/assessment. Steps and settings are validated server-side.')
+export const ListFormsResponse = zod.array(ListFormsResponseItem)
+
+
+/**
+ * @summary Create a smart form (admin only)
+ */
+export const CreateFormBody = zod.object({
+  "name": zod.string(),
+  "slug": zod.string(),
+  "description": zod.string().optional(),
+  "status": zod.enum(['draft', 'published']).optional(),
+  "steps": zod.array(zod.record(zod.string(), zod.unknown())),
+  "settings": zod.record(zod.string(), zod.unknown()).optional()
+})
+
+export const CreateFormResponse = zod.object({
+  "id": zod.string(),
+  "slug": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "status": zod.enum(['draft', 'published', 'archived']),
+  "isSeeded": zod.boolean().describe('True for system-seeded forms (e.g. the default assessment).'),
+  "steps": zod.array(zod.record(zod.string(), zod.unknown())).describe('Ordered steps; each has key, title, fields, and an optional showIf branching rule.'),
+  "settings": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}).describe('An org-configurable multi-step form\/assessment. Steps and settings are validated server-side.')
+
+
+/**
+ * @summary Update a smart form (admin only)
+ */
+export const UpdateFormParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const UpdateFormBody = zod.object({
+  "name": zod.string().optional(),
+  "slug": zod.string().optional(),
+  "description": zod.string().optional(),
+  "status": zod.enum(['draft', 'published', 'archived']).optional(),
+  "steps": zod.array(zod.record(zod.string(), zod.unknown())).optional(),
+  "settings": zod.record(zod.string(), zod.unknown()).optional()
+})
+
+export const UpdateFormResponse = zod.object({
+  "id": zod.string(),
+  "slug": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "status": zod.enum(['draft', 'published', 'archived']),
+  "isSeeded": zod.boolean().describe('True for system-seeded forms (e.g. the default assessment).'),
+  "steps": zod.array(zod.record(zod.string(), zod.unknown())).describe('Ordered steps; each has key, title, fields, and an optional showIf branching rule.'),
+  "settings": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.string(),
+  "updatedAt": zod.string()
+}).describe('An org-configurable multi-step form\/assessment. Steps and settings are validated server-side.')
+
+
+/**
+ * @summary Delete a smart form; forms that already have submissions are archived instead (admin only)
+ */
+export const DeleteFormParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const DeleteFormResponse = zod.object({
+  "outcome": zod.enum(['deleted', 'archived'])
+})
+
+
+/**
+ * @summary List submissions of a smart form (admin only)
+ */
+export const ListFormSubmissionsParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const ListFormSubmissionsResponseItem = zod.object({
+  "id": zod.string(),
+  "formId": zod.string(),
+  "leadId": zod.string().nullish(),
+  "contactId": zod.string().nullish(),
+  "answers": zod.record(zod.string(), zod.unknown()),
+  "attribution": zod.record(zod.string(), zod.unknown()),
+  "dedupeOutcome": zod.enum(['new_lead', 'existing_lead']),
+  "createdAt": zod.string()
+})
+export const ListFormSubmissionsResponse = zod.array(ListFormSubmissionsResponseItem)
+
+
+/**
+ * @summary Hosted page URL, embed snippet, and QR code (SVG) for a smart form (admin only)
+ */
+export const GetFormShareAssetsParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const GetFormShareAssetsResponse = zod.object({
+  "hostedUrl": zod.string().describe('Public hosted page URL for the form.'),
+  "embedSnippet": zod.string().describe('Script tag to paste into a third-party site.'),
+  "qrSvg": zod.string().describe('QR code for the hosted URL, as inline SVG markup.')
+})
+
+
+/**
+ * @summary Published form definition for the embed runtime and hosted pages
+ */
+export const GetPublicFormParams = zod.object({
+  "slug": zod.coerce.string()
+})
+
+export const GetPublicFormResponse = zod.object({
+  "slug": zod.string(),
+  "name": zod.string(),
+  "description": zod.string().nullish(),
+  "steps": zod.array(zod.record(zod.string(), zod.unknown())),
+  "settings": zod.record(zod.string(), zod.unknown())
+})
+
+
+/**
+ * @summary Submit a smart form (public, rate limited)
+ */
+export const SubmitPublicFormParams = zod.object({
+  "slug": zod.coerce.string()
+})
+
+export const SubmitPublicFormBody = zod.object({
+  "answers": zod.record(zod.string(), zod.unknown()).describe('Raw answers keyed by field key; validated server-side against the definition.'),
+  "attribution": zod.looseObject({
+
+}).optional(),
+  "anonymousId": zod.string().optional().describe('First-party analytics visitor id; submitting the form consents to linking prior session activity to the lead.'),
+  "sessionId": zod.string().optional().describe('First-party analytics session id for the submitting tab session.'),
+  "source": zod.string().optional().describe('Lead source override recorded on the lead.')
+})
+
+export const SubmitPublicFormResponse = zod.object({
+  "submissionId": zod.string(),
+  "leadId": zod.string(),
+  "deduped": zod.boolean(),
+  "score": zod.number(),
+  "scoreReasons": zod.array(zod.string()),
+  "urgency": zod.enum(['low', 'normal', 'high', 'emergency']),
+  "guidance": zod.string()
+})
+
+
+/**
+ * @summary Rotate the public installation key — the old key stops working immediately (admin only)
+ */
+export const RotateInstallationKeyResponse = zod.object({
+  "publicKey": zod.string(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Authorize a website domain for the installation key (admin only)
+ */
+export const AddAuthorizedDomainBody = zod.object({
+  "domain": zod.string().describe('Domain, URL, wildcard (\"\*.example.com\"), or localhost.')
+})
+
+export const AddAuthorizedDomainResponse = zod.object({
+  "id": zod.uuid(),
+  "domain": zod.string(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Remove an authorized domain (admin only)
+ */
+export const RemoveAuthorizedDomainParams = zod.object({
+  "id": zod.uuid()
+})
+
+export const RemoveAuthorizedDomainResponse = zod.void()
+
+
+/**
  * @summary List API keys (admin only)
  */
 export const ListApiKeysResponseItem = zod.object({
@@ -219,7 +529,6 @@ export const ListApiKeysResponse = zod.array(ListApiKeysResponseItem)
 /**
  * @summary Create an API key — the full key is returned once (admin only)
  */
-
 
 
 export const CreateApiKeyBody = zod.object({
@@ -248,8 +557,6 @@ export const CreateApiKeyResponse = zod.object({
 export const UpdateApiKeyParams = zod.object({
   "id": zod.uuid()
 })
-
-
 
 
 export const UpdateApiKeyBody = zod.object({
@@ -296,13 +603,11 @@ export const ListContactsResponseItem = zod.object({
   "email": zod.string().nullish(),
   "phone": zod.string().nullish(),
   "preferredContactMethod": zod.string().nullish(),
+  "doNotContact": zod.boolean().optional().describe('Hard do-not-contact flag; blocks ALL automated outreach on every channel.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
 export const ListContactsResponse = zod.array(ListContactsResponseItem)
-
-
-
 
 
 export const CreateContactBody = zod.object({
@@ -310,7 +615,8 @@ export const CreateContactBody = zod.object({
   "lastName": zod.string().optional(),
   "email": zod.string().optional(),
   "phone": zod.string().optional(),
-  "preferredContactMethod": zod.string().optional()
+  "preferredContactMethod": zod.string().optional(),
+  "doNotContact": zod.boolean().optional()
 })
 
 export const CreateContactResponse = zod.object({
@@ -321,6 +627,7 @@ export const CreateContactResponse = zod.object({
   "email": zod.string().nullish(),
   "phone": zod.string().nullish(),
   "preferredContactMethod": zod.string().nullish(),
+  "doNotContact": zod.boolean().optional().describe('Hard do-not-contact flag; blocks ALL automated outreach on every channel.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -338,6 +645,7 @@ export const GetContactResponse = zod.object({
   "email": zod.string().nullish(),
   "phone": zod.string().nullish(),
   "preferredContactMethod": zod.string().nullish(),
+  "doNotContact": zod.boolean().optional().describe('Hard do-not-contact flag; blocks ALL automated outreach on every channel.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -348,14 +656,13 @@ export const UpdateContactParams = zod.object({
 })
 
 
-
-
 export const UpdateContactBody = zod.object({
   "firstName": zod.string().min(1).optional(),
   "lastName": zod.string().nullish(),
   "email": zod.string().nullish(),
   "phone": zod.string().nullish(),
-  "preferredContactMethod": zod.string().nullish()
+  "preferredContactMethod": zod.string().nullish(),
+  "doNotContact": zod.boolean().optional()
 })
 
 export const UpdateContactResponse = zod.object({
@@ -366,6 +673,7 @@ export const UpdateContactResponse = zod.object({
   "email": zod.string().nullish(),
   "phone": zod.string().nullish(),
   "preferredContactMethod": zod.string().nullish(),
+  "doNotContact": zod.boolean().optional().describe('Hard do-not-contact flag; blocks ALL automated outreach on every channel.'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
 })
@@ -399,12 +707,6 @@ export const ListPropertiesResponseItem = zod.object({
   "createdAt": zod.coerce.date()
 })
 export const ListPropertiesResponse = zod.array(ListPropertiesResponseItem)
-
-
-
-
-
-
 
 
 export const CreatePropertyBody = zod.object({
@@ -460,11 +762,6 @@ export const UpdatePropertyParams = zod.object({
 })
 
 
-
-
-
-
-
 export const UpdatePropertyBody = zod.object({
   "contactId": zod.uuid().nullish(),
   "addressLine1": zod.string().min(1).optional(),
@@ -499,7 +796,8 @@ export const ListLeadsQueryParams = zod.object({
   "source": zod.coerce.string().optional().describe('Filter by lead source value (e.g. \'nationwide-inquiry\').'),
   "search": zod.coerce.string().optional().describe('Case-insensitive match on the contact name or service type.'),
   "limit": zod.coerce.number().int().optional().describe('Max rows to return (server caps at 200).'),
-  "offset": zod.coerce.number().int().optional().describe('Number of rows to skip, for paging past earlier results (server treats negatives as 0).')
+  "offset": zod.coerce.number().int().optional().describe('Number of rows to skip, for paging past earlier results (server treats negatives as 0).'),
+  "hasUnreadPortalMessage": zod.coerce.boolean().optional().describe('When true, return only leads where the most recent portal message is newer than the most recent team reply.')
 })
 
 export const ListLeadsResponseItem = zod.object({
@@ -513,6 +811,11 @@ export const ListLeadsResponseItem = zod.object({
   "serviceType": zod.string().nullish(),
   "source": zod.string().nullish(),
   "sourceDetail": zod.string().nullish(),
+  "latestSource": zod.string().nullish().describe('Most recent marketing source; `source` keeps the original.'),
+  "campaign": zod.string().nullish().describe('utm_campaign of the first touch.'),
+  "landingPage": zod.string().nullish(),
+  "referrer": zod.string().nullish(),
+  "creationMethod": zod.string().nullish().describe('How the lead entered the system (assessment, widget, form, concierge, api).'),
   "contactName": zod.string().nullish().describe('Convenience display name of the linked contact (list endpoints only).'),
   "contactEmail": zod.string().nullish().describe('Convenience email of the linked contact (list endpoints only).'),
   "contactPhone": zod.string().nullish().describe('Convenience phone of the linked contact (list endpoints only).'),
@@ -552,6 +855,11 @@ export const CreateLeadResponse = zod.object({
   "serviceType": zod.string().nullish(),
   "source": zod.string().nullish(),
   "sourceDetail": zod.string().nullish(),
+  "latestSource": zod.string().nullish().describe('Most recent marketing source; `source` keeps the original.'),
+  "campaign": zod.string().nullish().describe('utm_campaign of the first touch.'),
+  "landingPage": zod.string().nullish(),
+  "referrer": zod.string().nullish(),
+  "creationMethod": zod.string().nullish().describe('How the lead entered the system (assessment, widget, form, concierge, api).'),
   "contactName": zod.string().nullish().describe('Convenience display name of the linked contact (list endpoints only).'),
   "contactEmail": zod.string().nullish().describe('Convenience email of the linked contact (list endpoints only).'),
   "contactPhone": zod.string().nullish().describe('Convenience phone of the linked contact (list endpoints only).'),
@@ -570,7 +878,6 @@ export const CreateLeadResponse = zod.object({
  * @summary Apply a bulk action (stage change, assign, tag) to many leads
  */
 export const bulkUpdateLeadsBodyLeadIdsMax = 200;
-
 
 
 export const BulkUpdateLeadsBody = zod.object({
@@ -621,6 +928,11 @@ export const MergeLeadResponse = zod.object({
   "serviceType": zod.string().nullish(),
   "source": zod.string().nullish(),
   "sourceDetail": zod.string().nullish(),
+  "latestSource": zod.string().nullish().describe('Most recent marketing source; `source` keeps the original.'),
+  "campaign": zod.string().nullish().describe('utm_campaign of the first touch.'),
+  "landingPage": zod.string().nullish(),
+  "referrer": zod.string().nullish(),
+  "creationMethod": zod.string().nullish().describe('How the lead entered the system (assessment, widget, form, concierge, api).'),
   "contactName": zod.string().nullish().describe('Convenience display name of the linked contact (list endpoints only).'),
   "contactEmail": zod.string().nullish().describe('Convenience email of the linked contact (list endpoints only).'),
   "contactPhone": zod.string().nullish().describe('Convenience phone of the linked contact (list endpoints only).'),
@@ -651,7 +963,6 @@ export const ListSavedFiltersResponse = zod.array(ListSavedFiltersResponseItem)
  * @summary Save a filter preset for the current user
  */
 export const createSavedFilterBodyNameMax = 80;
-
 
 
 export const CreateSavedFilterBody = zod.object({
@@ -692,6 +1003,11 @@ export const GetLeadResponse = zod.object({
   "serviceType": zod.string().nullish(),
   "source": zod.string().nullish(),
   "sourceDetail": zod.string().nullish(),
+  "latestSource": zod.string().nullish().describe('Most recent marketing source; `source` keeps the original.'),
+  "campaign": zod.string().nullish().describe('utm_campaign of the first touch.'),
+  "landingPage": zod.string().nullish(),
+  "referrer": zod.string().nullish(),
+  "creationMethod": zod.string().nullish().describe('How the lead entered the system (assessment, widget, form, concierge, api).'),
   "contactName": zod.string().nullish().describe('Convenience display name of the linked contact (list endpoints only).'),
   "contactEmail": zod.string().nullish().describe('Convenience email of the linked contact (list endpoints only).'),
   "contactPhone": zod.string().nullish().describe('Convenience phone of the linked contact (list endpoints only).'),
@@ -733,6 +1049,11 @@ export const UpdateLeadResponse = zod.object({
   "serviceType": zod.string().nullish(),
   "source": zod.string().nullish(),
   "sourceDetail": zod.string().nullish(),
+  "latestSource": zod.string().nullish().describe('Most recent marketing source; `source` keeps the original.'),
+  "campaign": zod.string().nullish().describe('utm_campaign of the first touch.'),
+  "landingPage": zod.string().nullish(),
+  "referrer": zod.string().nullish(),
+  "creationMethod": zod.string().nullish().describe('How the lead entered the system (assessment, widget, form, concierge, api).'),
   "contactName": zod.string().nullish().describe('Convenience display name of the linked contact (list endpoints only).'),
   "contactEmail": zod.string().nullish().describe('Convenience email of the linked contact (list endpoints only).'),
   "contactPhone": zod.string().nullish().describe('Convenience phone of the linked contact (list endpoints only).'),
@@ -744,6 +1065,41 @@ export const UpdateLeadResponse = zod.object({
   "photoCount": zod.int().optional().describe('Total number of photos attached across all photos_attached activities (list endpoints only).'),
   "createdAt": zod.coerce.date(),
   "updatedAt": zod.coerce.date()
+})
+
+
+/**
+ * Attribution details plus the linked visitor's website behavior summary. Anonymous visitors are never linked, so unlinked leads return an empty behavior shape.
+ */
+export const GetLeadBehaviorParams = zod.object({
+  "id": zod.uuid()
+})
+
+export const GetLeadBehaviorResponse = zod.object({
+  "linked": zod.boolean().describe('Whether the lead has an associated website visitor id.'),
+  "attribution": zod.object({
+  "source": zod.string().nullish(),
+  "latestSource": zod.string().nullish(),
+  "campaign": zod.string().nullish(),
+  "landingPage": zod.string().nullish(),
+  "referrer": zod.string().nullish(),
+  "creationMethod": zod.string().nullish()
+}),
+  "behavior": zod.object({
+  "pageViews": zod.int(),
+  "sessions": zod.int(),
+  "activeDays": zod.int(),
+  "firstSeenAt": zod.string().nullish(),
+  "lastSeenAt": zod.string().nullish(),
+  "topPages": zod.array(zod.object({
+  "path": zod.string(),
+  "views": zod.int()
+})),
+  "highIntentPages": zod.array(zod.string()),
+  "toolsStarted": zod.array(zod.string()),
+  "abandonedForms": zod.int(),
+  "highlights": zod.array(zod.string())
+})
 })
 
 
@@ -759,7 +1115,6 @@ export const listEstimatesResponseLineItemsItemQuantityMin = 0;
 export const listEstimatesResponseLineItemsItemUnitPriceCentsMin = 0;
 
 export const listEstimatesResponseLineItemsItemTotalCentsMin = 0;
-
 
 
 export const ListEstimatesResponseItem = zod.object({
@@ -787,7 +1142,6 @@ export const ListEstimatesResponseItem = zod.object({
 export const ListEstimatesResponse = zod.array(ListEstimatesResponseItem)
 
 
-
 export const createEstimateBodyLineItemsItemQuantityMin = 0;
 
 export const createEstimateBodyLineItemsItemUnitPriceCentsMin = 0;
@@ -795,7 +1149,6 @@ export const createEstimateBodyLineItemsItemUnitPriceCentsMin = 0;
 export const createEstimateBodyLineItemsItemTotalCentsMin = 0;
 
 export const createEstimateBodyTaxCentsMin = 0;
-
 
 
 export const CreateEstimateBody = zod.object({
@@ -817,7 +1170,6 @@ export const createEstimateResponseLineItemsItemQuantityMin = 0;
 export const createEstimateResponseLineItemsItemUnitPriceCentsMin = 0;
 
 export const createEstimateResponseLineItemsItemTotalCentsMin = 0;
-
 
 
 export const CreateEstimateResponse = zod.object({
@@ -853,7 +1205,6 @@ export const getEstimateResponseLineItemsItemQuantityMin = 0;
 export const getEstimateResponseLineItemsItemUnitPriceCentsMin = 0;
 
 export const getEstimateResponseLineItemsItemTotalCentsMin = 0;
-
 
 
 export const GetEstimateResponse = zod.object({
@@ -894,7 +1245,6 @@ export const updateEstimateBodyLineItemsItemTotalCentsMin = 0;
 export const updateEstimateBodyTaxCentsMin = 0;
 
 
-
 export const UpdateEstimateBody = zod.object({
   "title": zod.string().min(1).optional(),
   "status": zod.enum(['draft', 'sent', 'accepted', 'declined']).optional(),
@@ -913,7 +1263,6 @@ export const updateEstimateResponseLineItemsItemQuantityMin = 0;
 export const updateEstimateResponseLineItemsItemUnitPriceCentsMin = 0;
 
 export const updateEstimateResponseLineItemsItemTotalCentsMin = 0;
-
 
 
 export const UpdateEstimateResponse = zod.object({
@@ -971,9 +1320,6 @@ export const ListProjectsResponseItem = zod.object({
 export const ListProjectsResponse = zod.array(ListProjectsResponseItem)
 
 
-
-
-
 export const CreateProjectBody = zod.object({
   "leadId": zod.uuid(),
   "estimateId": zod.uuid().optional(),
@@ -1028,8 +1374,6 @@ export const GetProjectResponse = zod.object({
 export const UpdateProjectParams = zod.object({
   "id": zod.uuid()
 })
-
-
 
 
 export const UpdateProjectBody = zod.object({
@@ -1091,9 +1435,6 @@ export const CreateLeadActivityParams = zod.object({
 })
 
 
-
-
-
 export const CreateLeadActivityBody = zod.object({
   "type": zod.string().min(1),
   "title": zod.string().min(1),
@@ -1121,9 +1462,6 @@ export const CreateLeadActivityResponse = zod.object({
 export const SendLeadEmailParams = zod.object({
   "id": zod.uuid()
 })
-
-
-
 
 
 export const SendLeadEmailBody = zod.object({
@@ -1158,7 +1496,6 @@ export const requestLeadPhotoUploadUrlBodyNameMax = 300;
 export const requestLeadPhotoUploadUrlBodySizeMax = 10485760;
 
 
-
 export const RequestLeadPhotoUploadUrlBody = zod.object({
   "name": zod.string().min(1).max(requestLeadPhotoUploadUrlBodyNameMax),
   "size": zod.int().min(1).max(requestLeadPhotoUploadUrlBodySizeMax),
@@ -1181,7 +1518,6 @@ export const AttachLeadPhotosParams = zod.object({
 
 export const attachLeadPhotosBodyPhotoPathsItemRegExp = new RegExp('^/objects/.+');
 export const attachLeadPhotosBodyPhotoPathsMax = 20;
-
 
 
 export const AttachLeadPhotosBody = zod.object({
@@ -1243,9 +1579,6 @@ export const ListTasksResponseItem = zod.object({
 export const ListTasksResponse = zod.array(ListTasksResponseItem)
 
 
-
-
-
 export const CreateTaskBody = zod.object({
   "title": zod.string().min(1),
   "description": zod.string().optional(),
@@ -1277,8 +1610,6 @@ export const CreateTaskResponse = zod.object({
 export const UpdateTaskParams = zod.object({
   "id": zod.uuid()
 })
-
-
 
 
 export const UpdateTaskBody = zod.object({
@@ -1445,7 +1776,6 @@ export const GetAssistantHistoryResponse = zod.object({
 export const saveAssistantHistoryBodyMessagesMax = 40;
 
 
-
 export const SaveAssistantHistoryBody = zod.object({
   "messages": zod.array(zod.object({
   "role": zod.enum(['user', 'assistant']),
@@ -1469,7 +1799,6 @@ export const SaveAssistantHistoryResponse = zod.object({
 export const sendAssistantChatBodyMessagesItemContentMax = 4000;
 
 export const sendAssistantChatBodyMessagesMax = 40;
-
 
 
 export const SendAssistantChatBody = zod.object({
@@ -1510,7 +1839,6 @@ export const ListAuditEventsResponse = zod.array(ListAuditEventsResponseItem)
 export const submitAssessmentBodyPhoneMin = 7;
 
 
-
 export const submitAssessmentBodyStateMin = 2;
 
 export const submitAssessmentBodyPostalCodeMin = 3;
@@ -1518,7 +1846,6 @@ export const submitAssessmentBodyPostalCodeMin = 3;
 
 export const submitAssessmentBodyPhotoPathsItemRegExp = new RegExp('^/objects/.+');
 export const submitAssessmentBodyPhotoPathsMax = 10;
-
 
 
 export const SubmitAssessmentBody = zod.object({
@@ -1540,7 +1867,18 @@ export const SubmitAssessmentBody = zod.object({
   "emailGranted": zod.boolean(),
   "disclosureVersion": zod.string().min(1)
 }),
-  "photoPaths": zod.array(zod.string().regex(submitAssessmentBodyPhotoPathsItemRegExp)).max(submitAssessmentBodyPhotoPathsMax).optional().describe('Object paths of damage photos uploaded via the public upload endpoint.')
+  "photoPaths": zod.array(zod.string().regex(submitAssessmentBodyPhotoPathsItemRegExp)).max(submitAssessmentBodyPhotoPathsMax).optional().describe('Object paths of damage photos uploaded via the public upload endpoint.'),
+  "attribution": zod.object({
+  "landingPage": zod.string().optional().describe('URL of the page the widget was submitted from.'),
+  "referrer": zod.string().optional(),
+  "utmSource": zod.string().optional(),
+  "utmMedium": zod.string().optional(),
+  "utmCampaign": zod.string().optional(),
+  "utmTerm": zod.string().optional(),
+  "utmContent": zod.string().optional()
+}).optional().describe('Best-effort marketing attribution captured by the embed script on the host page.'),
+  "anonymousId": zod.string().optional().describe('First-party analytics visitor id; submitting contact details consents to linking prior session activity to the lead.'),
+  "sessionId": zod.string().optional()
 })
 
 export const SubmitAssessmentResponse = zod.object({
@@ -1558,7 +1896,6 @@ export const SubmitAssessmentResponse = zod.object({
 export const requestPublicUploadUrlBodyNameMax = 300;
 
 export const requestPublicUploadUrlBodySizeMax = 10485760;
-
 
 
 export const RequestPublicUploadUrlBody = zod.object({
@@ -1590,7 +1927,6 @@ export const checkStormActivityBodyAddressMin = 5;
 export const checkStormActivityBodyAddressMax = 300;
 
 
-
 export const CheckStormActivityBody = zod.object({
   "address": zod.string().min(checkStormActivityBodyAddressMin).max(checkStormActivityBodyAddressMax)
 })
@@ -1615,7 +1951,17 @@ export const CheckStormActivityResponse = zod.object({
 export const StartConciergeConversationBody = zod.object({
   "source": zod.string().optional(),
   "path": zod.string().optional(),
-  "intent": zod.string().optional()
+  "intent": zod.string().optional(),
+  "attribution": zod.object({
+  "landingPage": zod.string().optional().describe('URL of the page the widget was submitted from.'),
+  "referrer": zod.string().optional(),
+  "utmSource": zod.string().optional(),
+  "utmMedium": zod.string().optional(),
+  "utmCampaign": zod.string().optional(),
+  "utmTerm": zod.string().optional(),
+  "utmContent": zod.string().optional()
+}).optional().describe('Best-effort marketing attribution captured by the embed script on the host page.'),
+  "anonymousId": zod.string().optional().describe('First-party analytics visitor id; linked to the lead only once the visitor identifies themselves in the chat.')
 })
 
 export const StartConciergeConversationResponse = zod.object({
@@ -1637,7 +1983,6 @@ export const SendConciergeMessageParams = zod.object({
 })
 
 export const sendConciergeMessageBodyContentMax = 2000;
-
 
 
 export const SendConciergeMessageBody = zod.object({
@@ -1700,7 +2045,6 @@ export const ListLeadConversationsResponse = zod.array(ListLeadConversationsResp
  */
 
 
-
 export const TrackAnalyticsEventBody = zod.object({
   "eventName": zod.string().min(1),
   "anonymousId": zod.string().optional(),
@@ -1750,11 +2094,77 @@ export const GetPublicSiteConfigResponse = zod.object({
 
 
 /**
+ * Enabled modules and appearance for the requesting installation key's organization. Contains no secrets. Unauthenticated (installation-key scoped).
+ * @summary Public widget configuration for the embeddable closer.js script
+ */
+export const GetPublicWidgetConfigResponse = zod.object({
+  "modules": zod.object({
+  "leadCapture": zod.boolean(),
+  "concierge": zod.boolean()
+}),
+  "concierge": zod.object({
+  "assistantName": zod.string(),
+  "greeting": zod.string()
+}).optional().describe('Public concierge display config (name + greeting) for the chat module.'),
+  "appearance": zod.object({
+  "primaryColor": zod.string(),
+  "position": zod.enum(['left', 'right']),
+  "greeting": zod.string(),
+  "buttonLabel": zod.string()
+}),
+  "businessName": zod.string().nullish(),
+  "testMode": zod.boolean().optional().describe('True while the org is previewing; the widget only renders with the preview flag.')
+}).describe('Public widget configuration served to the embed script. Never contains secrets.')
+
+
+/**
+ * Creates an org-scoped contact and lead with marketing attribution. Unauthenticated (installation-key scoped, rate limited).
+ * @summary Create a CRM lead from the embeddable lead-capture widget
+ */
+
+export const submitWidgetLeadBodyPhoneMin = 7;
+
+
+export const SubmitWidgetLeadBody = zod.object({
+  "firstName": zod.string().min(1),
+  "lastName": zod.string().optional(),
+  "phone": zod.string().min(submitWidgetLeadBodyPhoneMin),
+  "email": zod.string().optional(),
+  "message": zod.string().optional().describe('Free-form note from the visitor.'),
+  "attribution": zod.object({
+  "landingPage": zod.string().optional().describe('URL of the page the widget was submitted from.'),
+  "referrer": zod.string().optional(),
+  "utmSource": zod.string().optional(),
+  "utmMedium": zod.string().optional(),
+  "utmCampaign": zod.string().optional(),
+  "utmTerm": zod.string().optional(),
+  "utmContent": zod.string().optional()
+}).optional().describe('Best-effort marketing attribution captured by the embed script on the host page.'),
+  "anonymousId": zod.string().optional().describe('First-party analytics visitor id from the embed script.')
+})
+
+export const SubmitWidgetLeadResponse = zod.object({
+  "leadId": zod.uuid()
+})
+
+
+/**
+ * Sent by closer.js after a successful init so the admin panel can show last session, version and connection health. Unauthenticated (installation-key scoped, rate limited).
+ * @summary Widget heartbeat from the embed script
+ */
+export const RecordWidgetHeartbeatBody = zod.object({
+  "version": zod.string().optional(),
+  "host": zod.string().optional()
+})
+
+export const RecordWidgetHeartbeatResponse = zod.void()
+
+
+/**
  * Fetches reviews from the Google Places API, cached for 24 hours. Returns an empty list with isFallback=true when the API key is not configured or the API is unavailable.
  * @summary Live Google reviews for the marketing website
  */
 export const getPublicGoogleReviewsResponseReviewsItemRatingMax = 5;
-
 
 
 export const GetPublicGoogleReviewsResponse = zod.object({
@@ -1774,7 +2184,6 @@ export const GetPublicGoogleReviewsResponse = zod.object({
  */
 export const getMarketingSummaryQueryDaysDefault = 30;
 export const getMarketingSummaryQueryDaysMax = 365;
-
 
 
 export const GetMarketingSummaryQueryParams = zod.object({
@@ -1863,7 +2272,43 @@ export const GetSettingsResponse = zod.object({
   "googleReviews": zod.union([zod.object({
   "placeId": zod.string().optional().describe('Google Place ID for the business listing (e.g. ChIJ...).'),
   "apiKey": zod.string().optional().describe('Google Places API key with Places Details access.')
-}),zod.null()]).optional(),
+}).describe('Google Business Profile connection for the public reviews widget.'),zod.null()]).optional(),
+  "widget": zod.union([zod.object({
+  "leadCaptureEnabled": zod.boolean().describe('Master switch for the lead-capture launcher module.'),
+  "primaryColor": zod.string().optional().describe('CSS color for the launcher & accents.'),
+  "position": zod.enum(['left', 'right']).optional().describe('Corner the launcher docks to.'),
+  "greeting": zod.string().optional().describe('Greeting shown at the top of the open panel.'),
+  "buttonLabel": zod.string().optional().describe('Label on the launcher button.'),
+  "testMode": zod.boolean().optional().describe('When true the widget is hidden from normal visitors and only renders for pages loaded with the mf_preview=1 flag.'),
+  "conciergeEnabled": zod.boolean().optional().describe('AI concierge chat module (uses the org knowledge base + intake flow).')
+}).describe('Embeddable website widget (closer.js) modules & appearance. All values are public.'),zod.null()]).optional(),
+  "concierge": zod.union([zod.object({
+  "assistantName": zod.string().optional(),
+  "greeting": zod.string().optional(),
+  "intents": zod.array(zod.object({
+  "key": zod.string().describe('Stable key stored on conversations\/leads (e.g. \"leak\").'),
+  "label": zod.string().describe('Quick-reply label shown to visitors.'),
+  "service": zod.string().describe('CRM service slug recommended for this intent.'),
+  "points": zod.number().describe('Base lead-score points (0-100, clamped server-side).'),
+  "reason": zod.string().describe('Score-reason text shown to reps.'),
+  "urgency": zod.enum(['normal', 'high', 'emergency']),
+  "triage": zod.boolean().describe('Whether this intent runs the emergency triage question first.'),
+  "keywords": zod.array(zod.string()).describe('Case-insensitive substrings that detect this intent in free text.')
+}).describe('One selectable concierge intent. Array order controls keyword-match priority and quick-reply order.')).optional(),
+  "intakeDisclaimer": zod.string().optional().describe('Guardrail line sent when pricing\/insurance\/safety conclusions are asked.'),
+  "emergencySafety": zod.string().optional(),
+  "emergencyEscalation": zod.string().optional(),
+  "unknownAnswerFallback": zod.string().optional().describe('Reply when a visitor asks something the knowledge base cannot answer.'),
+  "wrapUpNote": zod.string().optional()
+}).describe('Org-configurable AI concierge behavior. Defaults preserve the original roofing behavior.'),zod.null()]).optional(),
+  "sendingHours": zod.union([zod.object({
+  "quietHoursEnabled": zod.boolean().describe('Master switch. Off means historical behavior (send any time).'),
+  "timezone": zod.string().describe('IANA timezone the sending window is evaluated in.'),
+  "startHour": zod.int().describe('Inclusive start hour (0-23) of the allowed sending window.'),
+  "endHour": zod.int().describe('Exclusive end hour (1-24) of the allowed sending window.'),
+  "days": zod.array(zod.string()).describe('Days sends are allowed (Mon..Sun).'),
+  "maxTouchesPerDay": zod.int().describe('Max automated touches per contact per rolling 24h (0 = unlimited).')
+}).describe('Quiet hours and frequency caps for automated outreach (playbooks + automation email\/SMS). Quiet hours defer sends into the next allowed window; they never drop them.'),zod.null()]).optional(),
   "updatedAt": zod.string().optional()
 })
 
@@ -1872,7 +2317,6 @@ export const GetSettingsResponse = zod.object({
  * @summary Update organization settings
  */
 export const updateSettingsBodyAiInstructionsMax = 4000;
-
 
 
 export const UpdateSettingsBody = zod.object({
@@ -1934,7 +2378,43 @@ export const UpdateSettingsBody = zod.object({
   "googleReviews": zod.object({
   "placeId": zod.string().optional().describe('Google Place ID for the business listing (e.g. ChIJ...).'),
   "apiKey": zod.string().optional().describe('Google Places API key with Places Details access.')
-}).optional()
+}).optional().describe('Google Business Profile connection for the public reviews widget.'),
+  "widget": zod.object({
+  "leadCaptureEnabled": zod.boolean().describe('Master switch for the lead-capture launcher module.'),
+  "primaryColor": zod.string().optional().describe('CSS color for the launcher & accents.'),
+  "position": zod.enum(['left', 'right']).optional().describe('Corner the launcher docks to.'),
+  "greeting": zod.string().optional().describe('Greeting shown at the top of the open panel.'),
+  "buttonLabel": zod.string().optional().describe('Label on the launcher button.'),
+  "testMode": zod.boolean().optional().describe('When true the widget is hidden from normal visitors and only renders for pages loaded with the mf_preview=1 flag.'),
+  "conciergeEnabled": zod.boolean().optional().describe('AI concierge chat module (uses the org knowledge base + intake flow).')
+}).optional().describe('Embeddable website widget (closer.js) modules & appearance. All values are public.'),
+  "concierge": zod.object({
+  "assistantName": zod.string().optional(),
+  "greeting": zod.string().optional(),
+  "intents": zod.array(zod.object({
+  "key": zod.string().describe('Stable key stored on conversations\/leads (e.g. \"leak\").'),
+  "label": zod.string().describe('Quick-reply label shown to visitors.'),
+  "service": zod.string().describe('CRM service slug recommended for this intent.'),
+  "points": zod.number().describe('Base lead-score points (0-100, clamped server-side).'),
+  "reason": zod.string().describe('Score-reason text shown to reps.'),
+  "urgency": zod.enum(['normal', 'high', 'emergency']),
+  "triage": zod.boolean().describe('Whether this intent runs the emergency triage question first.'),
+  "keywords": zod.array(zod.string()).describe('Case-insensitive substrings that detect this intent in free text.')
+}).describe('One selectable concierge intent. Array order controls keyword-match priority and quick-reply order.')).optional(),
+  "intakeDisclaimer": zod.string().optional().describe('Guardrail line sent when pricing\/insurance\/safety conclusions are asked.'),
+  "emergencySafety": zod.string().optional(),
+  "emergencyEscalation": zod.string().optional(),
+  "unknownAnswerFallback": zod.string().optional().describe('Reply when a visitor asks something the knowledge base cannot answer.'),
+  "wrapUpNote": zod.string().optional()
+}).optional().describe('Org-configurable AI concierge behavior. Defaults preserve the original roofing behavior.'),
+  "sendingHours": zod.object({
+  "quietHoursEnabled": zod.boolean().describe('Master switch. Off means historical behavior (send any time).'),
+  "timezone": zod.string().describe('IANA timezone the sending window is evaluated in.'),
+  "startHour": zod.int().describe('Inclusive start hour (0-23) of the allowed sending window.'),
+  "endHour": zod.int().describe('Exclusive end hour (1-24) of the allowed sending window.'),
+  "days": zod.array(zod.string()).describe('Days sends are allowed (Mon..Sun).'),
+  "maxTouchesPerDay": zod.int().describe('Max automated touches per contact per rolling 24h (0 = unlimited).')
+}).optional().describe('Quiet hours and frequency caps for automated outreach (playbooks + automation email\/SMS). Quiet hours defer sends into the next allowed window; they never drop them.')
 })
 
 export const UpdateSettingsResponse = zod.object({
@@ -1998,7 +2478,43 @@ export const UpdateSettingsResponse = zod.object({
   "googleReviews": zod.union([zod.object({
   "placeId": zod.string().optional().describe('Google Place ID for the business listing (e.g. ChIJ...).'),
   "apiKey": zod.string().optional().describe('Google Places API key with Places Details access.')
-}),zod.null()]).optional(),
+}).describe('Google Business Profile connection for the public reviews widget.'),zod.null()]).optional(),
+  "widget": zod.union([zod.object({
+  "leadCaptureEnabled": zod.boolean().describe('Master switch for the lead-capture launcher module.'),
+  "primaryColor": zod.string().optional().describe('CSS color for the launcher & accents.'),
+  "position": zod.enum(['left', 'right']).optional().describe('Corner the launcher docks to.'),
+  "greeting": zod.string().optional().describe('Greeting shown at the top of the open panel.'),
+  "buttonLabel": zod.string().optional().describe('Label on the launcher button.'),
+  "testMode": zod.boolean().optional().describe('When true the widget is hidden from normal visitors and only renders for pages loaded with the mf_preview=1 flag.'),
+  "conciergeEnabled": zod.boolean().optional().describe('AI concierge chat module (uses the org knowledge base + intake flow).')
+}).describe('Embeddable website widget (closer.js) modules & appearance. All values are public.'),zod.null()]).optional(),
+  "concierge": zod.union([zod.object({
+  "assistantName": zod.string().optional(),
+  "greeting": zod.string().optional(),
+  "intents": zod.array(zod.object({
+  "key": zod.string().describe('Stable key stored on conversations\/leads (e.g. \"leak\").'),
+  "label": zod.string().describe('Quick-reply label shown to visitors.'),
+  "service": zod.string().describe('CRM service slug recommended for this intent.'),
+  "points": zod.number().describe('Base lead-score points (0-100, clamped server-side).'),
+  "reason": zod.string().describe('Score-reason text shown to reps.'),
+  "urgency": zod.enum(['normal', 'high', 'emergency']),
+  "triage": zod.boolean().describe('Whether this intent runs the emergency triage question first.'),
+  "keywords": zod.array(zod.string()).describe('Case-insensitive substrings that detect this intent in free text.')
+}).describe('One selectable concierge intent. Array order controls keyword-match priority and quick-reply order.')).optional(),
+  "intakeDisclaimer": zod.string().optional().describe('Guardrail line sent when pricing\/insurance\/safety conclusions are asked.'),
+  "emergencySafety": zod.string().optional(),
+  "emergencyEscalation": zod.string().optional(),
+  "unknownAnswerFallback": zod.string().optional().describe('Reply when a visitor asks something the knowledge base cannot answer.'),
+  "wrapUpNote": zod.string().optional()
+}).describe('Org-configurable AI concierge behavior. Defaults preserve the original roofing behavior.'),zod.null()]).optional(),
+  "sendingHours": zod.union([zod.object({
+  "quietHoursEnabled": zod.boolean().describe('Master switch. Off means historical behavior (send any time).'),
+  "timezone": zod.string().describe('IANA timezone the sending window is evaluated in.'),
+  "startHour": zod.int().describe('Inclusive start hour (0-23) of the allowed sending window.'),
+  "endHour": zod.int().describe('Exclusive end hour (1-24) of the allowed sending window.'),
+  "days": zod.array(zod.string()).describe('Days sends are allowed (Mon..Sun).'),
+  "maxTouchesPerDay": zod.int().describe('Max automated touches per contact per rolling 24h (0 = unlimited).')
+}).describe('Quiet hours and frequency caps for automated outreach (playbooks + automation email\/SMS). Quiet hours defer sends into the next allowed window; they never drop them.'),zod.null()]).optional(),
   "updatedAt": zod.string().optional()
 })
 
@@ -2059,8 +2575,6 @@ export const ListTemplatesResponse = zod.array(ListTemplatesResponseItem)
  */
 
 
-
-
 export const CreateTemplateBody = zod.object({
   "name": zod.string().min(1),
   "channel": zod.enum(['email', 'sms']),
@@ -2085,9 +2599,6 @@ export const CreateTemplateResponse = zod.object({
 export const UpdateTemplateParams = zod.object({
   "id": zod.uuid()
 })
-
-
-
 
 
 export const UpdateTemplateBody = zod.object({
@@ -2142,8 +2653,6 @@ export const ListAutomationsResponse = zod.array(ListAutomationsResponseItem)
  */
 
 
-
-
 export const CreateAutomationBody = zod.object({
   "name": zod.string().min(1),
   "event": zod.string().min(1),
@@ -2175,9 +2684,6 @@ export const CreateAutomationResponse = zod.object({
 export const UpdateAutomationParams = zod.object({
   "id": zod.uuid()
 })
-
-
-
 
 
 export const UpdateAutomationBody = zod.object({
@@ -2238,6 +2744,682 @@ export const ListAutomationRunsResponseItem = zod.object({
   "createdAt": zod.string()
 })
 export const ListAutomationRunsResponse = zod.array(ListAutomationRunsResponseItem)
+
+
+/**
+ * @summary List outreach playbooks
+ */
+export const ListPlaybooksResponseItem = zod.object({
+  "id": zod.uuid(),
+  "name": zod.string(),
+  "seedKey": zod.string().nullish(),
+  "isActive": zod.boolean(),
+  "enrollmentRules": zod.object({
+  "minScore": zod.number().nullish(),
+  "urgencies": zod.array(zod.string()).optional(),
+  "serviceTypes": zod.array(zod.string()).optional(),
+  "sources": zod.array(zod.string()).optional()
+}),
+  "steps": zod.array(zod.object({
+  "channel": zod.enum(['email', 'sms']),
+  "delayMinutes": zod.number(),
+  "subject": zod.string().optional(),
+  "prompt": zod.string(),
+  "variants": zod.array(zod.object({
+  "key": zod.string(),
+  "prompt": zod.string(),
+  "subject": zod.string().optional()
+})).optional(),
+  "pinnedVariant": zod.string().optional()
+})),
+  "updatedAt": zod.string().optional()
+})
+export const ListPlaybooksResponse = zod.array(ListPlaybooksResponseItem)
+
+
+/**
+ * @summary Create an outreach playbook
+ */
+
+
+export const CreatePlaybookBody = zod.object({
+  "name": zod.string().min(1),
+  "isActive": zod.boolean().optional(),
+  "enrollmentRules": zod.object({
+  "minScore": zod.number().nullish(),
+  "urgencies": zod.array(zod.string()).optional(),
+  "serviceTypes": zod.array(zod.string()).optional(),
+  "sources": zod.array(zod.string()).optional()
+}).optional(),
+  "steps": zod.array(zod.object({
+  "channel": zod.enum(['email', 'sms']),
+  "delayMinutes": zod.number(),
+  "subject": zod.string().optional(),
+  "prompt": zod.string(),
+  "variants": zod.array(zod.object({
+  "key": zod.string(),
+  "prompt": zod.string(),
+  "subject": zod.string().optional()
+})).optional(),
+  "pinnedVariant": zod.string().optional()
+}))
+})
+
+export const CreatePlaybookResponse = zod.object({
+  "id": zod.uuid(),
+  "name": zod.string(),
+  "seedKey": zod.string().nullish(),
+  "isActive": zod.boolean(),
+  "enrollmentRules": zod.object({
+  "minScore": zod.number().nullish(),
+  "urgencies": zod.array(zod.string()).optional(),
+  "serviceTypes": zod.array(zod.string()).optional(),
+  "sources": zod.array(zod.string()).optional()
+}),
+  "steps": zod.array(zod.object({
+  "channel": zod.enum(['email', 'sms']),
+  "delayMinutes": zod.number(),
+  "subject": zod.string().optional(),
+  "prompt": zod.string(),
+  "variants": zod.array(zod.object({
+  "key": zod.string(),
+  "prompt": zod.string(),
+  "subject": zod.string().optional()
+})).optional(),
+  "pinnedVariant": zod.string().optional()
+})),
+  "updatedAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Update an outreach playbook
+ */
+export const UpdatePlaybookParams = zod.object({
+  "id": zod.uuid()
+})
+
+
+export const UpdatePlaybookBody = zod.object({
+  "name": zod.string().min(1).optional(),
+  "isActive": zod.boolean().optional(),
+  "enrollmentRules": zod.object({
+  "minScore": zod.number().nullish(),
+  "urgencies": zod.array(zod.string()).optional(),
+  "serviceTypes": zod.array(zod.string()).optional(),
+  "sources": zod.array(zod.string()).optional()
+}).optional(),
+  "steps": zod.array(zod.object({
+  "channel": zod.enum(['email', 'sms']),
+  "delayMinutes": zod.number(),
+  "subject": zod.string().optional(),
+  "prompt": zod.string(),
+  "variants": zod.array(zod.object({
+  "key": zod.string(),
+  "prompt": zod.string(),
+  "subject": zod.string().optional()
+})).optional(),
+  "pinnedVariant": zod.string().optional()
+})).optional()
+})
+
+export const UpdatePlaybookResponse = zod.object({
+  "id": zod.uuid(),
+  "name": zod.string(),
+  "seedKey": zod.string().nullish(),
+  "isActive": zod.boolean(),
+  "enrollmentRules": zod.object({
+  "minScore": zod.number().nullish(),
+  "urgencies": zod.array(zod.string()).optional(),
+  "serviceTypes": zod.array(zod.string()).optional(),
+  "sources": zod.array(zod.string()).optional()
+}),
+  "steps": zod.array(zod.object({
+  "channel": zod.enum(['email', 'sms']),
+  "delayMinutes": zod.number(),
+  "subject": zod.string().optional(),
+  "prompt": zod.string(),
+  "variants": zod.array(zod.object({
+  "key": zod.string(),
+  "prompt": zod.string(),
+  "subject": zod.string().optional()
+})).optional(),
+  "pinnedVariant": zod.string().optional()
+})),
+  "updatedAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Get the lead's playbook enrollment (live or most recent)
+ */
+export const GetLeadEnrollmentParams = zod.object({
+  "id": zod.uuid()
+})
+
+export const GetLeadEnrollmentResponse = zod.object({
+  "enrollment": zod.object({
+  "id": zod.uuid(),
+  "playbookId": zod.uuid(),
+  "leadId": zod.uuid(),
+  "status": zod.enum(['active', 'paused', 'completed', 'stopped']),
+  "currentStep": zod.number(),
+  "pauseReason": zod.string().nullish(),
+  "nextRunAt": zod.string().nullish(),
+  "history": zod.array(zod.object({
+  "at": zod.string(),
+  "kind": zod.string(),
+  "stepIndex": zod.number().optional(),
+  "channel": zod.string().optional(),
+  "detail": zod.string().optional()
+})),
+  "playbookName": zod.string().optional(),
+  "totalSteps": zod.number().optional()
+}).nullable()
+})
+
+
+/**
+ * @summary Pause a live playbook enrollment
+ */
+export const PauseEnrollmentParams = zod.object({
+  "id": zod.uuid()
+})
+
+export const PauseEnrollmentResponse = zod.object({
+  "id": zod.uuid(),
+  "playbookId": zod.uuid(),
+  "leadId": zod.uuid(),
+  "status": zod.enum(['active', 'paused', 'completed', 'stopped']),
+  "currentStep": zod.number(),
+  "pauseReason": zod.string().nullish(),
+  "nextRunAt": zod.string().nullish(),
+  "history": zod.array(zod.object({
+  "at": zod.string(),
+  "kind": zod.string(),
+  "stepIndex": zod.number().optional(),
+  "channel": zod.string().optional(),
+  "detail": zod.string().optional()
+})),
+  "playbookName": zod.string().optional(),
+  "totalSteps": zod.number().optional()
+})
+
+
+/**
+ * @summary Resume a paused playbook enrollment
+ */
+export const ResumeEnrollmentParams = zod.object({
+  "id": zod.uuid()
+})
+
+export const ResumeEnrollmentResponse = zod.object({
+  "id": zod.uuid(),
+  "playbookId": zod.uuid(),
+  "leadId": zod.uuid(),
+  "status": zod.enum(['active', 'paused', 'completed', 'stopped']),
+  "currentStep": zod.number(),
+  "pauseReason": zod.string().nullish(),
+  "nextRunAt": zod.string().nullish(),
+  "history": zod.array(zod.object({
+  "at": zod.string(),
+  "kind": zod.string(),
+  "stepIndex": zod.number().optional(),
+  "channel": zod.string().optional(),
+  "detail": zod.string().optional()
+})),
+  "playbookName": zod.string().optional(),
+  "totalSteps": zod.number().optional()
+})
+
+
+/**
+ * @summary Skip the enrollment's current step
+ */
+export const SkipEnrollmentStepParams = zod.object({
+  "id": zod.uuid()
+})
+
+export const SkipEnrollmentStepResponse = zod.object({
+  "id": zod.uuid(),
+  "playbookId": zod.uuid(),
+  "leadId": zod.uuid(),
+  "status": zod.enum(['active', 'paused', 'completed', 'stopped']),
+  "currentStep": zod.number(),
+  "pauseReason": zod.string().nullish(),
+  "nextRunAt": zod.string().nullish(),
+  "history": zod.array(zod.object({
+  "at": zod.string(),
+  "kind": zod.string(),
+  "stepIndex": zod.number().optional(),
+  "channel": zod.string().optional(),
+  "detail": zod.string().optional()
+})),
+  "playbookName": zod.string().optional(),
+  "totalSteps": zod.number().optional()
+})
+
+
+/**
+ * @summary List past CSV lead imports
+ */
+export const ListLeadImportsResponseItem = zod.object({
+  "id": zod.string(),
+  "fileName": zod.string().nullish(),
+  "totalRows": zod.number(),
+  "imported": zod.number(),
+  "duplicates": zod.number(),
+  "skipped": zod.number(),
+  "suppressed": zod.number(),
+  "errors": zod.array(zod.string()),
+  "createdAt": zod.string()
+})
+export const ListLeadImportsResponse = zod.array(ListLeadImportsResponseItem)
+
+
+/**
+ * @summary Import leads from a CSV file
+ */
+export const ImportLeadsCsvBody = zod.object({
+  "csv": zod.string(),
+  "mapping": zod.record(zod.string(), zod.number()).describe('Map of import field name to 0-based CSV column index.'),
+  "fileName": zod.string().optional(),
+  "hasHeader": zod.boolean().optional(),
+  "defaultStatus": zod.string().optional(),
+  "defaultSource": zod.string().optional()
+})
+
+export const ImportLeadsCsvResponse = zod.object({
+  "id": zod.string(),
+  "fileName": zod.string().nullish(),
+  "totalRows": zod.number(),
+  "imported": zod.number(),
+  "duplicates": zod.number(),
+  "skipped": zod.number(),
+  "suppressed": zod.number(),
+  "errors": zod.array(zod.string()),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Recommended win-back segments with live counts
+ */
+export const ListReactivationSegmentsResponseItem = zod.object({
+  "key": zod.string(),
+  "name": zod.string(),
+  "description": zod.string(),
+  "segment": zod.object({
+  "statuses": zod.array(zod.string()).optional(),
+  "minAgeDays": zod.number().nullish(),
+  "inactiveDays": zod.number().nullish(),
+  "sources": zod.array(zod.string()).optional()
+}),
+  "count": zod.number()
+})
+export const ListReactivationSegmentsResponse = zod.array(ListReactivationSegmentsResponseItem)
+
+
+/**
+ * @summary Count and sample leads matching a segment
+ */
+export const PreviewReactivationSegmentBody = zod.object({
+  "segment": zod.object({
+  "statuses": zod.array(zod.string()).optional(),
+  "minAgeDays": zod.number().nullish(),
+  "inactiveDays": zod.number().nullish(),
+  "sources": zod.array(zod.string()).optional()
+}).optional()
+})
+
+export const PreviewReactivationSegmentResponse = zod.object({
+  "segment": zod.object({
+  "statuses": zod.array(zod.string()).optional(),
+  "minAgeDays": zod.number().nullish(),
+  "inactiveDays": zod.number().nullish(),
+  "sources": zod.array(zod.string()).optional()
+}),
+  "count": zod.number(),
+  "sample": zod.array(zod.object({
+  "id": zod.string(),
+  "contactName": zod.string().nullish(),
+  "status": zod.string(),
+  "source": zod.string().nullish(),
+  "createdAt": zod.string()
+}))
+})
+
+
+/**
+ * @summary List reactivation campaigns
+ */
+export const ListReactivationCampaignsResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "playbookId": zod.string(),
+  "playbookName": zod.string().nullish(),
+  "segment": zod.object({
+  "statuses": zod.array(zod.string()).optional(),
+  "minAgeDays": zod.number().nullish(),
+  "inactiveDays": zod.number().nullish(),
+  "sources": zod.array(zod.string()).optional()
+}),
+  "status": zod.enum(['draft', 'running', 'paused', 'completed', 'cancelled']),
+  "ratePerHour": zod.number(),
+  "totalLeads": zod.number(),
+  "enrolledCount": zod.number().optional(),
+  "launchedAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "createdAt": zod.string()
+})
+export const ListReactivationCampaignsResponse = zod.array(ListReactivationCampaignsResponseItem)
+
+
+/**
+ * @summary Create a draft reactivation campaign
+ */
+export const CreateReactivationCampaignBody = zod.object({
+  "name": zod.string(),
+  "playbookId": zod.string(),
+  "segment": zod.object({
+  "statuses": zod.array(zod.string()).optional(),
+  "minAgeDays": zod.number().nullish(),
+  "inactiveDays": zod.number().nullish(),
+  "sources": zod.array(zod.string()).optional()
+}).optional(),
+  "ratePerHour": zod.number().optional()
+})
+
+export const CreateReactivationCampaignResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "playbookId": zod.string(),
+  "playbookName": zod.string().nullish(),
+  "segment": zod.object({
+  "statuses": zod.array(zod.string()).optional(),
+  "minAgeDays": zod.number().nullish(),
+  "inactiveDays": zod.number().nullish(),
+  "sources": zod.array(zod.string()).optional()
+}),
+  "status": zod.enum(['draft', 'running', 'paused', 'completed', 'cancelled']),
+  "ratePerHour": zod.number(),
+  "totalLeads": zod.number(),
+  "enrolledCount": zod.number().optional(),
+  "launchedAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Generate sample first-step outreach for a segment + playbook
+ */
+export const PreviewReactivationOutreachBody = zod.object({
+  "playbookId": zod.string(),
+  "segment": zod.object({
+  "statuses": zod.array(zod.string()).optional(),
+  "minAgeDays": zod.number().nullish(),
+  "inactiveDays": zod.number().nullish(),
+  "sources": zod.array(zod.string()).optional()
+}).optional()
+})
+
+export const PreviewReactivationOutreachResponse = zod.object({
+  "samples": zod.array(zod.object({
+  "leadId": zod.string(),
+  "contactName": zod.string().nullish(),
+  "channel": zod.string(),
+  "subject": zod.string().nullish(),
+  "body": zod.string()
+}))
+})
+
+
+/**
+ * @summary Campaign detail with progress and outcome report
+ */
+export const GetReactivationCampaignReportParams = zod.object({
+  "id": zod.uuid()
+})
+
+export const GetReactivationCampaignReportResponse = zod.object({
+  "campaign": zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "playbookId": zod.string(),
+  "playbookName": zod.string().nullish(),
+  "segment": zod.object({
+  "statuses": zod.array(zod.string()).optional(),
+  "minAgeDays": zod.number().nullish(),
+  "inactiveDays": zod.number().nullish(),
+  "sources": zod.array(zod.string()).optional()
+}),
+  "status": zod.enum(['draft', 'running', 'paused', 'completed', 'cancelled']),
+  "ratePerHour": zod.number(),
+  "totalLeads": zod.number(),
+  "enrolledCount": zod.number().optional(),
+  "launchedAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "createdAt": zod.string()
+}),
+  "enrolled": zod.number(),
+  "pending": zod.number(),
+  "skipped": zod.number(),
+  "contacted": zod.number(),
+  "replied": zod.number(),
+  "booked": zod.number(),
+  "recoveredRevenueCents": zod.number()
+})
+
+
+/**
+ * @summary Snapshot the segment and start throttled enrollment
+ */
+export const LaunchReactivationCampaignParams = zod.object({
+  "id": zod.uuid()
+})
+
+export const LaunchReactivationCampaignResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "playbookId": zod.string(),
+  "playbookName": zod.string().nullish(),
+  "segment": zod.object({
+  "statuses": zod.array(zod.string()).optional(),
+  "minAgeDays": zod.number().nullish(),
+  "inactiveDays": zod.number().nullish(),
+  "sources": zod.array(zod.string()).optional()
+}),
+  "status": zod.enum(['draft', 'running', 'paused', 'completed', 'cancelled']),
+  "ratePerHour": zod.number(),
+  "totalLeads": zod.number(),
+  "enrolledCount": zod.number().optional(),
+  "launchedAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Pause enrollment of new leads
+ */
+export const PauseReactivationCampaignParams = zod.object({
+  "id": zod.uuid()
+})
+
+export const PauseReactivationCampaignResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "playbookId": zod.string(),
+  "playbookName": zod.string().nullish(),
+  "segment": zod.object({
+  "statuses": zod.array(zod.string()).optional(),
+  "minAgeDays": zod.number().nullish(),
+  "inactiveDays": zod.number().nullish(),
+  "sources": zod.array(zod.string()).optional()
+}),
+  "status": zod.enum(['draft', 'running', 'paused', 'completed', 'cancelled']),
+  "ratePerHour": zod.number(),
+  "totalLeads": zod.number(),
+  "enrolledCount": zod.number().optional(),
+  "launchedAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Resume a paused campaign
+ */
+export const ResumeReactivationCampaignParams = zod.object({
+  "id": zod.uuid()
+})
+
+export const ResumeReactivationCampaignResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "playbookId": zod.string(),
+  "playbookName": zod.string().nullish(),
+  "segment": zod.object({
+  "statuses": zod.array(zod.string()).optional(),
+  "minAgeDays": zod.number().nullish(),
+  "inactiveDays": zod.number().nullish(),
+  "sources": zod.array(zod.string()).optional()
+}),
+  "status": zod.enum(['draft', 'running', 'paused', 'completed', 'cancelled']),
+  "ratePerHour": zod.number(),
+  "totalLeads": zod.number(),
+  "enrolledCount": zod.number().optional(),
+  "launchedAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Cancel the campaign and stop its sequences
+ */
+export const CancelReactivationCampaignParams = zod.object({
+  "id": zod.uuid()
+})
+
+export const CancelReactivationCampaignResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "playbookId": zod.string(),
+  "playbookName": zod.string().nullish(),
+  "segment": zod.object({
+  "statuses": zod.array(zod.string()).optional(),
+  "minAgeDays": zod.number().nullish(),
+  "inactiveDays": zod.number().nullish(),
+  "sources": zod.array(zod.string()).optional()
+}),
+  "status": zod.enum(['draft', 'running', 'paused', 'completed', 'cancelled']),
+  "ratePerHour": zod.number(),
+  "totalLeads": zod.number(),
+  "enrolledCount": zod.number().optional(),
+  "launchedAt": zod.string().nullish(),
+  "completedAt": zod.string().nullish(),
+  "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Conversion Insights — funnel by playbook/step/variant/channel plus engine decisions and lift
+ */
+export const GetPlaybookInsightsResponse = zod.object({
+  "funnel": zod.array(zod.object({
+  "playbookId": zod.uuid(),
+  "playbookName": zod.string(),
+  "stepIndex": zod.number(),
+  "variantKey": zod.string(),
+  "channel": zod.string(),
+  "sent": zod.number(),
+  "replied": zod.number(),
+  "booked": zod.number(),
+  "won": zod.number(),
+  "lost": zod.number()
+})),
+  "decisions": zod.array(zod.object({
+  "kind": zod.string(),
+  "stepIndex": zod.number().nullish(),
+  "explanation": zod.string(),
+  "createdAt": zod.string()
+})),
+  "baselineReplyRate": zod.number(),
+  "engineReplyRate": zod.number(),
+  "liftPercent": zod.number().nullish(),
+  "totalTouches": zod.number()
+})
+
+
+/**
+ * @summary Next best action for a lead, with an AI draft when it's a message
+ */
+export const GetLeadNextActionParams = zod.object({
+  "id": zod.uuid()
+})
+
+export const GetLeadNextActionResponse = zod.object({
+  "leadId": zod.uuid(),
+  "actionType": zod.enum(['reply_portal_message', 'call_now', 'send_message', 'follow_up_estimate', 'schedule_follow_up', 'none']),
+  "title": zod.string(),
+  "reasons": zod.array(zod.string()),
+  "priority": zod.number(),
+  "channel": zod.enum(['email', 'sms', 'phone']).optional(),
+  "draft": zod.object({
+  "subject": zod.string().optional(),
+  "body": zod.string(),
+  "provider": zod.string()
+}).optional(),
+  "leadSummary": zod.string().nullish(),
+  "leadStatus": zod.string(),
+  "contactName": zod.string().nullish(),
+  "score": zod.int()
+})
+
+
+/**
+ * @summary Record how the rep responded to a recommendation (sent, edited, snoozed, dismissed)
+ */
+export const RecordNextActionFeedbackParams = zod.object({
+  "id": zod.uuid()
+})
+
+export const RecordNextActionFeedbackBody = zod.object({
+  "actionType": zod.string(),
+  "response": zod.enum(['sent', 'edited', 'snoozed', 'dismissed']),
+  "snoozeHours": zod.int().optional()
+})
+
+export const RecordNextActionFeedbackResponse = zod.void()
+
+
+/**
+ * @summary Prioritized "today's actions" queue across all workable leads
+ */
+export const ListTodayActionsQueryParams = zod.object({
+  "limit": zod.coerce.number().int().optional()
+})
+
+export const ListTodayActionsResponseItem = zod.object({
+  "leadId": zod.uuid(),
+  "actionType": zod.enum(['reply_portal_message', 'call_now', 'send_message', 'follow_up_estimate', 'schedule_follow_up', 'none']),
+  "title": zod.string(),
+  "reasons": zod.array(zod.string()),
+  "priority": zod.number(),
+  "channel": zod.enum(['email', 'sms', 'phone']).optional(),
+  "draft": zod.object({
+  "subject": zod.string().optional(),
+  "body": zod.string(),
+  "provider": zod.string()
+}).optional(),
+  "leadSummary": zod.string().nullish(),
+  "leadStatus": zod.string(),
+  "contactName": zod.string().nullish(),
+  "score": zod.int()
+})
+export const ListTodayActionsResponse = zod.array(ListTodayActionsResponseItem)
 
 
 /**
@@ -2319,7 +3501,6 @@ export const RotateWebhookSecretParams = zod.object({
 export const rotateWebhookSecretBodyGracePeriodHoursMin = 0;
 
 
-
 export const RotateWebhookSecretBody = zod.object({
   "gracePeriodHours": zod.int().min(rotateWebhookSecretBodyGracePeriodHoursMin).optional().describe('Hours the old secret keeps being honored alongside the new one (deliveries carry both signatures). 0 revokes it immediately. Defaults to 24; capped at 168 (7 days).')
 })
@@ -2392,7 +3573,6 @@ export const ListTagsResponse = zod.array(ListTagsResponseItem)
  */
 
 
-
 export const CreateTagBody = zod.object({
   "name": zod.string().min(1),
   "color": zod.string().optional()
@@ -2410,7 +3590,6 @@ export const CreateTagResponse = zod.object({
  */
 export const requestPortalLoginCodeBodyIdentifierMin = 3;
 export const requestPortalLoginCodeBodyIdentifierMax = 254;
-
 
 
 export const RequestPortalLoginCodeBody = zod.object({
@@ -2431,7 +3610,6 @@ export const verifyPortalLoginCodeBodyIdentifierMax = 254;
 
 export const verifyPortalLoginCodeBodyCodeMin = 6;
 export const verifyPortalLoginCodeBodyCodeMax = 6;
-
 
 
 export const VerifyPortalLoginCodeBody = zod.object({
@@ -2513,7 +3691,6 @@ export const SendPortalMessageHeader = zod.object({
 export const sendPortalMessageBodyContentMax = 2000;
 
 
-
 export const SendPortalMessageBody = zod.object({
   "content": zod.string().min(1).max(sendPortalMessageBodyContentMax)
 })
@@ -2559,7 +3736,6 @@ export const addPortalClaimPhotosBodyPhotoPathsItemRegExp = new RegExp('^/object
 export const addPortalClaimPhotosBodyPhotoPathsMax = 10;
 
 
-
 export const AddPortalClaimPhotosBody = zod.object({
   "photoPaths": zod.array(zod.string().regex(addPortalClaimPhotosBodyPhotoPathsItemRegExp)).min(1).max(addPortalClaimPhotosBodyPhotoPathsMax).describe('Object paths of damage photos uploaded via the public upload endpoint.')
 })
@@ -2593,5 +3769,4 @@ export const LogoutPortalSessionHeader = zod.object({
 export const LogoutPortalSessionResponse = zod.object({
   "ok": zod.boolean()
 })
-
 

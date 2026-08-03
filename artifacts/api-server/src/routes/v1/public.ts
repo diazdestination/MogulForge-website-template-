@@ -7,6 +7,7 @@ import {
   SubmitAssessmentBody,
   TrackAnalyticsEventBody,
   TranscribeConciergeAudioBody,
+  SubmitWidgetLeadBody,
 } from "@workspace/api-zod";
 import { analyticsEventsTable, db } from "@workspace/db";
 import { Router, type IRouter, type Request, type Response } from "express";
@@ -18,6 +19,7 @@ import {
 } from "../../lib/objectStorage";
 import { validatePhotoObjects } from "../../lib/photoValidation";
 import { rateLimit } from "../../lib/rateLimit";
+import { resolvePublicOrg } from "../../middlewares/publicOrg";
 import { captureAssessment } from "../../services/assessment";
 import { emitAutomationEvent } from "../../services/automation";
 import { handleMessage, startConversation } from "../../services/concierge";
@@ -25,6 +27,15 @@ import { renderAreaShareCard } from "../../services/ogCard";
 import { getDefaultOrganization } from "../../services/org";
 import { getOrgSettings } from "../../services/settings";
 import { providers, transcribeAudio } from "../../services/providers";
+import { recordHeartbeat } from "../../services/installation";
+import { captureWidgetLead, getPublicWidgetConfig } from "../../services/widget";
+import {
+  captureFormSubmission,
+  getPublicForm,
+  getPublicFormRow,
+} from "../../services/forms";
+import { CLOSER_JS, CLOSER_JS_VERSION } from "../../widget/closerScript";
+import { FORMS_JS, FORMS_JS_VERSION } from "../../widget/formsScript";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -43,6 +54,7 @@ function clientIp(req: Request): string | undefined {
 router.post(
   "/public/assessments",
   rateLimit({ windowMs: 60_000, max: 5, key: "assessments" }),
+  resolvePublicOrg(),
   async (req: Request, res: Response): Promise<void> => {
     const parsed = SubmitAssessmentBody.safeParse(req.body);
     if (!parsed.success) {
@@ -59,7 +71,7 @@ router.post(
         return;
       }
     }
-    const org = await getDefaultOrganization();
+    const org = req.publicOrg!;
     const result = await captureAssessment({
       organizationId: org.id,
       submission: parsed.data,
@@ -81,6 +93,7 @@ router.post(
 router.post(
   "/public/uploads/request-url",
   rateLimit({ windowMs: 60_000, max: 20, key: "public-uploads" }),
+  resolvePublicOrg(),
   async (req: Request, res: Response): Promise<void> => {
     const parsed = RequestPublicUploadUrlBody.safeParse(req.body);
     if (!parsed.success) {
@@ -102,6 +115,7 @@ router.post(
 router.post(
   "/public/storm-check",
   rateLimit({ windowMs: 60_000, max: 10, key: "storm-check" }),
+  resolvePublicOrg(),
   async (req: Request, res: Response): Promise<void> => {
     const parsed = CheckStormActivityBody.safeParse(req.body);
     if (!parsed.success) {
@@ -123,17 +137,20 @@ router.post(
 router.post(
   "/public/concierge/conversations",
   rateLimit({ windowMs: 60_000, max: 10, key: "concierge-start" }),
+  resolvePublicOrg(),
   async (req: Request, res: Response): Promise<void> => {
     const parsed = StartConciergeConversationBody.safeParse(req.body ?? {});
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid conversation request" });
       return;
     }
-    const org = await getDefaultOrganization();
+    const org = req.publicOrg!;
     const result = await startConversation({
       organizationId: org.id,
       source: parsed.data.source,
       intentHint: parsed.data.intent,
+      attribution: parsed.data.attribution,
+      anonymousId: parsed.data.anonymousId,
     });
     res.status(201).json(result);
   },
@@ -156,6 +173,7 @@ const ALLOWED_AUDIO_TYPES = new Set([
 router.post(
   "/public/concierge/transcriptions",
   rateLimit({ windowMs: 60_000, max: 20, key: "concierge-transcribe" }),
+  resolvePublicOrg(),
   async (req: Request, res: Response): Promise<void> => {
     const parsed = TranscribeConciergeAudioBody.safeParse(req.body);
     if (!parsed.success) {
@@ -195,6 +213,7 @@ router.post(
 router.post(
   "/public/concierge/conversations/:id/messages",
   rateLimit({ windowMs: 60_000, max: 30, key: "concierge-message" }),
+  resolvePublicOrg(),
   async (req: Request, res: Response): Promise<void> => {
     const parsed = SendConciergeMessageBody.safeParse(req.body);
     if (!parsed.success) {
@@ -206,7 +225,7 @@ router.post(
       res.status(404).json({ error: "Conversation not found" });
       return;
     }
-    const org = await getDefaultOrganization();
+    const org = req.publicOrg!;
     const reply = await handleMessage({
       organizationId: org.id,
       conversationId,
@@ -225,8 +244,9 @@ router.post(
 router.get(
   "/public/site-config",
   rateLimit({ windowMs: 60_000, max: 60, key: "site-config" }),
-  async (_req: Request, res: Response): Promise<void> => {
-    const org = await getDefaultOrganization();
+  resolvePublicOrg(),
+  async (req: Request, res: Response): Promise<void> => {
+    const org = req.publicOrg!;
     const settings = await getOrgSettings(org.id);
     res.json({
       businessProfile: settings.businessProfile ?? {},
@@ -244,9 +264,10 @@ router.get(
 router.get(
   "/public/og/area/:slug",
   rateLimit({ windowMs: 60_000, max: 60, key: "og-area-card" }),
+  resolvePublicOrg(),
   async (req: Request, res: Response): Promise<void> => {
     const slug = String(req.params.slug).replace(/\.png$/i, "");
-    const org = await getDefaultOrganization();
+    const org = req.publicOrg!;
     const settings = await getOrgSettings(org.id);
     const area = (settings.serviceAreas ?? []).find(
       (a) => a.isActive && a.slug === slug,
@@ -274,13 +295,14 @@ router.get(
 router.post(
   "/public/analytics-events",
   rateLimit({ windowMs: 60_000, max: 60, key: "analytics" }),
+  resolvePublicOrg(),
   async (req: Request, res: Response): Promise<void> => {
     const parsed = TrackAnalyticsEventBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "Invalid analytics event" });
       return;
     }
-    const org = await getDefaultOrganization();
+    const org = req.publicOrg!;
     await db.insert(analyticsEventsTable).values({
       organizationId: org.id,
       eventName: parsed.data.eventName,
@@ -291,6 +313,250 @@ router.post(
       properties: parsed.data.properties ?? {},
     });
     res.status(202).json({ accepted: true });
+  },
+);
+
+// ---------- embeddable website widget (closer.js) ----------
+
+// The loader script itself carries no org data (the key lives in the host
+// page's script tag), so it is served without tenant resolution and cached
+// aggressively. Version the URL (?v=N) to bust caches on script changes.
+router.get(
+  "/public/closer.js",
+  rateLimit({ windowMs: 60_000, max: 120, key: "closer-js" }),
+  (_req: Request, res: Response): void => {
+    res
+      .status(200)
+      .setHeader("Content-Type", "application/javascript; charset=utf-8")
+      .setHeader("Cache-Control", "public, max-age=3600")
+      .setHeader("ETag", `"closer-v${CLOSER_JS_VERSION}"`)
+      .send(CLOSER_JS);
+  },
+);
+
+router.get(
+  "/public/widget-config",
+  rateLimit({ windowMs: 60_000, max: 120, key: "widget-config" }),
+  resolvePublicOrg({ requireKey: true }),
+  async (req: Request, res: Response): Promise<void> => {
+    const org = req.publicOrg!;
+    // Tenant-specific response — must never land in a shared cache keyed
+    // only by URL, so cache privately in the visitor's browser.
+    res
+      .setHeader("Cache-Control", "private, max-age=300")
+      .json(
+        await getPublicWidgetConfig(org.id, {
+          preview: req.query.preview === "1",
+        }),
+      );
+  },
+);
+
+router.post(
+  "/public/widget-leads",
+  rateLimit({ windowMs: 60_000, max: 10, key: "widget-leads" }),
+  resolvePublicOrg({ requireKey: true }),
+  async (req: Request, res: Response): Promise<void> => {
+    const parsed = SubmitWidgetLeadBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid lead submission" });
+      return;
+    }
+    const org = req.publicOrg!;
+    // Gate on the module toggle only (preview:true): test mode hides the
+    // widget from visitors but must not block the admin's preview submits.
+    const config = await getPublicWidgetConfig(org.id, { preview: true });
+    if (!config.modules.leadCapture) {
+      res.status(403).json({ error: "Lead capture is disabled" });
+      return;
+    }
+    const result = await captureWidgetLead({
+      organizationId: org.id,
+      submission: parsed.data,
+      sourceIp: clientIp(req),
+      userAgent: req.headers["user-agent"],
+    });
+    emitAutomationEvent(org.id, "lead.created", {
+      leadId: result.leadId,
+      fields: {
+        "lead.status": "new",
+        "lead.urgency": result.urgency,
+        "lead.source": "widget",
+      },
+    });
+    res.status(201).json({ leadId: result.leadId });
+  },
+);
+
+// Heartbeat: closer.js pings once per successful init so the admin panel can
+// show "last session / version / health" without crawling the site.
+router.post(
+  "/public/widget-heartbeat",
+  rateLimit({ windowMs: 60_000, max: 60, key: "widget-heartbeat" }),
+  resolvePublicOrg({ requireKey: true }),
+  async (req: Request, res: Response): Promise<void> => {
+    const body = (req.body ?? {}) as { version?: unknown };
+    // Derive the host from the validated Origin/Referer (already checked
+    // against the authorized-domain list) rather than trusting the body.
+    let host: string | undefined;
+    try {
+      const raw = req.headers.origin || req.headers.referer;
+      if (typeof raw === "string") host = new URL(raw).hostname;
+    } catch {
+      /* ignore */
+    }
+    await recordHeartbeat(req.publicOrgKey!.id, {
+      version: typeof body.version === "string" ? body.version : undefined,
+      host,
+    });
+    res.status(204).end();
+  },
+);
+
+// ---------- smart forms (embed runtime + hosted pages) ----------
+
+// The runtime script carries no org data (key + slug live in the host page's
+// script tag or hosted-page URL), so it is served without tenant resolution.
+router.get(
+  "/public/forms.js",
+  rateLimit({ windowMs: 60_000, max: 120, key: "forms-js" }),
+  (_req: Request, res: Response): void => {
+    res
+      .status(200)
+      .setHeader("Content-Type", "application/javascript; charset=utf-8")
+      .setHeader("Cache-Control", "public, max-age=3600")
+      .setHeader("ETag", `"forms-v${FORMS_JS_VERSION}"`)
+      .send(FORMS_JS);
+  },
+);
+
+router.get(
+  "/public/forms/:slug",
+  rateLimit({ windowMs: 60_000, max: 120, key: "public-form-def" }),
+  resolvePublicOrg(),
+  async (req: Request, res: Response): Promise<void> => {
+    const form = await getPublicForm(req.publicOrg!.id, String(req.params.slug));
+    if (!form) {
+      res.status(404).json({ error: "Form not found" });
+      return;
+    }
+    // Tenant-specific — cache privately only.
+    res.setHeader("Cache-Control", "private, max-age=120").json(form);
+  },
+);
+
+router.post(
+  "/public/forms/:slug/submissions",
+  rateLimit({ windowMs: 60_000, max: 5, key: "public-form-submit" }),
+  resolvePublicOrg(),
+  async (req: Request, res: Response): Promise<void> => {
+    const org = req.publicOrg!;
+    const form = await getPublicFormRow(org.id, String(req.params.slug));
+    if (!form) {
+      res.status(404).json({ error: "Form not found" });
+      return;
+    }
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const photoPaths = Object.values(
+      (body.answers && typeof body.answers === "object" ? body.answers : {}) as Record<string, unknown>,
+    )
+      .filter((v): v is string[] => Array.isArray(v) && v.length > 0 && v.every((p) => typeof p === "string" && p.startsWith("/objects/")))
+      .flat();
+    if (photoPaths.length > 0) {
+      const validation = await validatePhotoObjects(objectStorageService, photoPaths);
+      if (!validation.ok) {
+        res.status(400).json({ error: validation.reason });
+        return;
+      }
+    }
+    const result = await captureFormSubmission({
+      organizationId: org.id,
+      form,
+      answers: body.answers,
+      attribution: body.attribution,
+      anonymousId: typeof body.anonymousId === "string" ? body.anonymousId : undefined,
+      source: typeof body.source === "string" ? body.source : undefined,
+      sourceIp: clientIp(req),
+      userAgent: req.headers["user-agent"],
+    });
+    if ("error" in result) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    if (!result.deduped) {
+      emitAutomationEvent(org.id, "lead.created", {
+        leadId: result.leadId,
+        fields: {
+          "lead.status": "new",
+          "lead.urgency": result.urgency,
+          "lead.source": typeof body.source === "string" ? body.source : `form:${form.slug}`,
+        },
+      });
+    }
+    res.status(201).json(result);
+  },
+);
+
+// Hosted MogulForge form page: a minimal shell that loads the same forms.js
+// runtime used by third-party embeds. The key is public by design; the
+// runtime's fetches are same-origin here, which resolvePublicOrg accepts.
+router.get(
+  "/public/form-page/:slug",
+  rateLimit({ windowMs: 60_000, max: 60, key: "form-page" }),
+  (req: Request, res: Response): void => {
+    const slug = String(req.params.slug);
+    const rawKey = String(req.query.key ?? "");
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(slug) || !/^[A-Za-z0-9_]{0,100}$/.test(rawKey)) {
+      res.status(400).send("Invalid link");
+      return;
+    }
+    const attrs =
+      `data-form="${slug}"` + (rawKey ? ` data-org-id="${rawKey}"` : "");
+    res
+      .status(200)
+      .setHeader("Content-Type", "text/html; charset=utf-8")
+      .setHeader("Cache-Control", "no-store")
+      .send(`<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Request form</title>
+<meta name="robots" content="noindex">
+<style>body{margin:0;background:#f3f4f6;min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:32px 16px;font-family:system-ui,sans-serif}#mf-form{width:100%;max-width:560px}</style></head>
+<body>
+<div id="mf-form"></div>
+<script async src="/api/v1/public/forms.js" ${attrs} data-target="#mf-form"></script>
+</body>
+</html>`);
+  },
+);
+
+// Local demo page simulating a third-party site with the snippet installed.
+// Everything on it is public information (the key is public by design).
+router.get(
+  "/public/widget-demo",
+  rateLimit({ windowMs: 60_000, max: 30, key: "widget-demo" }),
+  (req: Request, res: Response): void => {
+    const rawKey = String(req.query.key ?? "");
+    if (!/^[A-Za-z0-9_]{0,80}$/.test(rawKey)) {
+      res.status(400).send("Invalid key");
+      return;
+    }
+    const snippet = rawKey
+      ? `<script async src="/api/v1/public/closer.js" data-org-id="${rawKey}"></script>`
+      : "<!-- pass ?key=mfi_... to load the widget -->";
+    res
+      .status(200)
+      .setHeader("Content-Type", "text/html; charset=utf-8")
+      .setHeader("Cache-Control", "no-store")
+      .send(`<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Widget demo — third-party site</title>
+<style>body{font-family:Georgia,serif;max-width:640px;margin:40px auto;padding:0 16px;line-height:1.6}</style></head>
+<body>
+<h1>Acme Home Services</h1>
+<p>This page simulates a customer's existing website with the Closer snippet pasted in. The launcher should appear in the corner if the key is valid and this host is authorized.</p>
+${snippet}
+</body>
+</html>`);
   },
 );
 

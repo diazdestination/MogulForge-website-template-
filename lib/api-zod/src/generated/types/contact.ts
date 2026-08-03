@@ -18,6 +18,8 @@ export interface Contact {
   phone?: string | null;
   /** @nullable */
   preferredContactMethod?: string | null;
+  /** Hard do-not-contact flag; blocks ALL automated outreach on every channel. */
+  doNotContact?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }

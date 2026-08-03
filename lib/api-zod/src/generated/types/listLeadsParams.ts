@@ -26,4 +26,8 @@ limit?: number;
  * Number of rows to skip, for paging past earlier results (server treats negatives as 0).
  */
 offset?: number;
+/**
+ * When true, return only leads where the most recent portal message is newer than the most recent team reply.
+ */
+hasUnreadPortalMessage?: boolean;
 };

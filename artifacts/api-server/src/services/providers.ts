@@ -393,6 +393,56 @@ export async function transcribeAudio(
   const data = (await res.json()) as { text?: string };
   return (data.text ?? "").trim();
 }
+/**
+ * Draft one outreach touch (email or SMS body) for a Closer Engine playbook
+ * step, personalized from the lead's context. Uses OpenAI when configured;
+ * falls back to a clearly-labeled deterministic mock so dev/test flows never
+ * depend on the API. Guardrails: never promise pricing, insurance outcomes,
+ * or damage conclusions — the message only offers help and next steps.
+ */
+export async function draftOutreachMessage(input: {
+  channel: "email" | "sms";
+  prompt: string;
+  businessName: string;
+  contactFirstName: string;
+  leadSummary?: string;
+  serviceType?: string;
+  urgency: string;
+  stepNumber: number;
+  totalSteps: number;
+}): Promise<{ body: string; provider: string }> {
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const body = await openAiComplete(
+        [
+          `You write ${input.channel === "sms" ? "SMS texts (max 2 short sentences, no links, no emojis)" : "short plain-text emails (max 6 short lines, no HTML)"} for ${input.businessName}, a roofing company, reaching out to a homeowner who requested help.`,
+          "Rules: never state pricing, never guarantee insurance approval, never conclude the roof is damaged — only offer help and a clear next step.",
+          "Address the homeowner by first name. Sign off with the business name.",
+          "Output ONLY the message body.",
+        ].join(" "),
+        [
+          `Homeowner first name: ${input.contactFirstName}`,
+          `Their request: ${input.leadSummary ?? input.serviceType ?? "roofing help"}`,
+          `Urgency: ${input.urgency}`,
+          `Touch ${input.stepNumber} of ${input.totalSteps}. Direction for this message: ${input.prompt}`,
+        ].join("\n"),
+      );
+      return { body, provider: "openai" };
+    } catch (err) {
+      console.warn(
+        "[playbooks] OpenAI draft failed, using fallback copy:",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+  const greeting = `Hi ${input.contactFirstName},`;
+  const core =
+    input.channel === "sms"
+      ? `${input.businessName} here — we're ready to help with your ${input.serviceType ?? "roof"}. Reply to this text and we'll take care of the rest.`
+      : `${greeting}\n\nThanks for reaching out about your ${input.serviceType ?? "roof"} — our team is ready to help and your free inspection is easy to schedule. Just reply to this email and we'll set it up.\n\n— ${input.businessName}`;
+  return { body: core, provider: "template-fallback" };
+}
+
 async function openAiComplete(system: string, user: string): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
