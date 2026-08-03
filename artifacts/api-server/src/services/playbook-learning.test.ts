@@ -6,11 +6,13 @@ import {
   playbookTouchesTable,
   playbooksTable,
   type Playbook,
+  DEFAULT_SENDING_HOURS,
 } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { deleteTestOrgs } from "../test-helpers/delete-test-orgs";
+import { updateOrgSettings } from "./settings";
 
 import { runEvent } from "./automation";
 import * as crm from "./crm";
@@ -34,6 +36,11 @@ beforeAll(async () => {
     .values({ name: "Playbook Learning Test Org", slug })
     .returning();
   org = row;
+  // These suites run at any wall-clock time: disable the (default-on)
+  // sending window so step execution is deterministic.
+  await updateOrgSettings(org.id, {
+    sendingHours: { ...DEFAULT_SENDING_HOURS, quietHoursEnabled: false },
+  });
 });
 
 afterAll(async () => {

@@ -500,3 +500,112 @@ export async function recordActionFeedback(
   }
   return true;
 }
+
+// ---------- Copilot performance (learning-loop insights) ----------
+
+export interface CopilotActionTypeStats {
+  actionType: string;
+  sent: number;
+  edited: number;
+  snoozed: number;
+  dismissed: number;
+  total: number;
+  /** (sent + edited) / total, null when there's no feedback for the type. */
+  acceptanceRate: number | null;
+}
+
+export interface CopilotPerformance {
+  byActionType: CopilotActionTypeStats[];
+  conversion: {
+    /** Leads where at least one suggestion was sent/edited (acted on). */
+    actedLeads: number;
+    actedWon: number;
+    /** Leads whose only responses were snoozes/dismissals. */
+    dismissedLeads: number;
+    dismissedWon: number;
+  };
+  totalFeedback: number;
+}
+
+/**
+ * Aggregates rep responses to copilot suggestions: acceptance per action
+ * type, plus a won-rate comparison between leads whose suggestions were
+ * acted on vs only dismissed/snoozed. Org-scoped; read-only.
+ */
+export async function getCopilotPerformance(
+  organizationId: string,
+): Promise<CopilotPerformance> {
+  const [byTypeRows, byLeadRows] = await Promise.all([
+    db
+      .select({
+        actionType: nextActionFeedbackTable.actionType,
+        response: nextActionFeedbackTable.response,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(nextActionFeedbackTable)
+      .where(eq(nextActionFeedbackTable.organizationId, organizationId))
+      .groupBy(
+        nextActionFeedbackTable.actionType,
+        nextActionFeedbackTable.response,
+      ),
+    db
+      .select({
+        leadId: nextActionFeedbackTable.leadId,
+        acted: sql<boolean>`bool_or(${nextActionFeedbackTable.response} IN ('sent', 'edited'))`,
+        won: sql<boolean>`bool_or(${leadsTable.status} = 'won')`,
+      })
+      .from(nextActionFeedbackTable)
+      .innerJoin(leadsTable, eq(nextActionFeedbackTable.leadId, leadsTable.id))
+      .where(eq(nextActionFeedbackTable.organizationId, organizationId))
+      .groupBy(nextActionFeedbackTable.leadId),
+  ]);
+
+  const byType = new Map<string, CopilotActionTypeStats>();
+  let totalFeedback = 0;
+  for (const row of byTypeRows) {
+    const stats = byType.get(row.actionType) ?? {
+      actionType: row.actionType,
+      sent: 0,
+      edited: 0,
+      snoozed: 0,
+      dismissed: 0,
+      total: 0,
+      acceptanceRate: null,
+    };
+    if (
+      row.response === "sent" ||
+      row.response === "edited" ||
+      row.response === "snoozed" ||
+      row.response === "dismissed"
+    ) {
+      stats[row.response] += row.count;
+    }
+    stats.total += row.count;
+    totalFeedback += row.count;
+    byType.set(row.actionType, stats);
+  }
+  const byActionType = [...byType.values()]
+    .map((s) => ({
+      ...s,
+      acceptanceRate: s.total > 0 ? (s.sent + s.edited) / s.total : null,
+    }))
+    .sort((a, b) => b.total - a.total);
+
+  const conversion = {
+    actedLeads: 0,
+    actedWon: 0,
+    dismissedLeads: 0,
+    dismissedWon: 0,
+  };
+  for (const row of byLeadRows) {
+    if (row.acted) {
+      conversion.actedLeads += 1;
+      if (row.won) conversion.actedWon += 1;
+    } else {
+      conversion.dismissedLeads += 1;
+      if (row.won) conversion.dismissedWon += 1;
+    }
+  }
+
+  return { byActionType, conversion, totalFeedback };
+}

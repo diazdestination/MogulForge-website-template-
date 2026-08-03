@@ -168,7 +168,8 @@ function zonedParts(date: Date, timezone: string): { weekday: string; hour: numb
   return { weekday, hour };
 }
 
-function isWithinWindow(cfg: SendingHoursSettings, at: Date): boolean {
+/** Whether `at` falls inside the org's permitted sending window. */
+export function isWithinWindow(cfg: SendingHoursSettings, at: Date): boolean {
   const { weekday, hour } = zonedParts(at, cfg.timezone);
   return cfg.days.includes(weekday) && hour >= cfg.startHour && hour < cfg.endHour;
 }

@@ -149,6 +149,7 @@ const EXPECTED_PERMISSIONS: Record<string, Permission> = {
   "DELETE /automations/:id": "settings.manage",
   "GET /automation-runs": "crm.read",
   "GET /playbook-insights": "crm.read",
+  "GET /copilot-performance": "crm.read",
   "GET /next-actions": "crm.read",
   "GET /leads/:id/next-action": "crm.read",
   "POST /leads/:id/next-action/feedback": "crm.write",

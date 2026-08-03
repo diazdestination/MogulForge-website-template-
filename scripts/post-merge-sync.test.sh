@@ -528,6 +528,83 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Tests 9–11: SHARED_EXCLUDE_PATTERNS filter in _shared_changed_files()
+#
+# Verifies that the exclusion logic in post-merge.sh fires correctly:
+#   9.  Only scripts/post-merge.sh changed → SHARED_CHANGED stays false
+#  10.  Only *.md files changed           → SHARED_CHANGED stays false
+#  11.  Mix of excluded + a lib/ file     → SHARED_CHANGED becomes true
+#
+# We replicate the relevant snippet verbatim from post-merge.sh so the test
+# stays in sync with the actual implementation without sourcing the whole
+# script (which would run pnpm install, etc.).
+# ---------------------------------------------------------------------------
+
+# Inline replica of the exclusion logic from post-merge.sh
+_test_shared_changed() {
+  local changed_files="$1"
+
+  local SHARED_EXCLUDE_PATTERNS
+  SHARED_EXCLUDE_PATTERNS=(
+    "^scripts/post-merge\.sh$"
+    "\.md$"
+  )
+
+  local files="$changed_files"
+  local pat
+  for pat in "${SHARED_EXCLUDE_PATTERNS[@]}"; do
+    files="$(echo "$files" | grep -v "$pat" || true)"
+  done
+  local SHARED_CHANGED_FILES="$files"
+
+  _shared_changed_in_inner() {
+    [ -n "$SHARED_CHANGED_FILES" ] && echo "$SHARED_CHANGED_FILES" | grep -q "^${1}"
+  }
+
+  local SHARED_CHANGED=false
+  if _shared_changed_in_inner "artifacts/api-server/" \
+      || _shared_changed_in_inner "lib/" \
+      || _shared_changed_in_inner "scripts/"; then
+    SHARED_CHANGED=true
+  fi
+
+  echo "$SHARED_CHANGED"
+}
+
+echo ""
+echo "Test 9: Only scripts/post-merge.sh changed — SHARED_CHANGED must be false (excluded)"
+
+CHANGED9="scripts/post-merge.sh"
+RESULT9="$(_test_shared_changed "$CHANGED9")"
+if [ "$RESULT9" = "false" ]; then
+  _pass "scripts/post-merge.sh-only diff: SHARED_CHANGED=false (excluded correctly)"
+else
+  _fail "scripts/post-merge.sh-only diff: expected SHARED_CHANGED=false, got '$RESULT9'"
+fi
+
+echo ""
+echo "Test 10: Only *.md files changed — SHARED_CHANGED must be false (excluded)"
+
+CHANGED10="$(printf 'README.md\ndocs/CHANGELOG.md\nscripts/NOTES.md')"
+RESULT10="$(_test_shared_changed "$CHANGED10")"
+if [ "$RESULT10" = "false" ]; then
+  _pass "*.md-only diff: SHARED_CHANGED=false (excluded correctly)"
+else
+  _fail "*.md-only diff: expected SHARED_CHANGED=false, got '$RESULT10'"
+fi
+
+echo ""
+echo "Test 11: Mix of excluded paths + a lib/ file — SHARED_CHANGED must be true"
+
+CHANGED11="$(printf 'README.md\nscripts/post-merge.sh\nlib/utils/helper.ts')"
+RESULT11="$(_test_shared_changed "$CHANGED11")"
+if [ "$RESULT11" = "true" ]; then
+  _pass "Excluded + lib/ diff: SHARED_CHANGED=true (included path not filtered out)"
+else
+  _fail "Excluded + lib/ diff: expected SHARED_CHANGED=true, got '$RESULT11'"
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 echo ""

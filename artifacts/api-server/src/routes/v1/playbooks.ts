@@ -18,6 +18,7 @@ import {
   stopEnrollmentsForLead,
 } from "../../services/playbooks";
 import { getConversionInsights } from "../../services/playbook-learning";
+import { getCopilotPerformance } from "../../services/next-best-action";
 import { playbookEnrollmentsTable } from "@workspace/db";
 
 const router: IRouter = Router();
@@ -29,6 +30,14 @@ router.get(
   requireMember("crm.read"),
   async (req: Request, res: Response): Promise<void> => {
     res.json(await getConversionInsights(req.member!.organizationId));
+  },
+);
+
+router.get(
+  "/copilot-performance",
+  requireMember("crm.read"),
+  async (req: Request, res: Response): Promise<void> => {
+    res.json(await getCopilotPerformance(req.member!.organizationId));
   },
 );
 

@@ -276,11 +276,13 @@ export interface SendingHoursSettings {
 }
 
 /**
- * Defaults preserve historical behavior: quiet hours OFF (sends any time).
- * The frequency cap applies whenever > 0, independent of quiet hours.
+ * Defaults are safe-by-default: automated outreach only goes out 8am–8pm in
+ * the org's local timezone, so no homeowner is ever texted or emailed in the
+ * middle of the night unless an org explicitly opts out. The frequency cap
+ * applies whenever > 0, independent of quiet hours.
  */
 export const DEFAULT_SENDING_HOURS: SendingHoursSettings = {
-  quietHoursEnabled: false,
+  quietHoursEnabled: true,
   timezone: "America/New_York",
   startHour: 8,
   endHour: 20,

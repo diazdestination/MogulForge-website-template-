@@ -2964,6 +2964,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ConversionInsights"
+  /v1/copilot-performance:
+    get:
+      operationId: getCopilotPerformance
+      tags: [playbooks]
+      summary: Copilot performance — acceptance rate per action type and a won-rate comparison for acted-on vs dismissed leads
+      responses:
+        "200":
+          description: Copilot performance metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CopilotPerformance"
   /v1/leads/{id}/next-action:
     get:
       operationId: getLeadNextAction
@@ -6233,6 +6245,49 @@ components:
           type: number
           nullable: true
         totalTouches:
+          type: number
+    CopilotActionTypeStats:
+      type: object
+      required: [actionType, sent, edited, snoozed, dismissed, total]
+      properties:
+        actionType:
+          type: string
+        sent:
+          type: number
+        edited:
+          type: number
+        snoozed:
+          type: number
+        dismissed:
+          type: number
+        total:
+          type: number
+        acceptanceRate:
+          type: number
+          nullable: true
+    CopilotConversionComparison:
+      type: object
+      required: [actedLeads, actedWon, dismissedLeads, dismissedWon]
+      properties:
+        actedLeads:
+          type: number
+        actedWon:
+          type: number
+        dismissedLeads:
+          type: number
+        dismissedWon:
+          type: number
+    CopilotPerformance:
+      type: object
+      required: [byActionType, conversion, totalFeedback]
+      properties:
+        byActionType:
+          type: array
+          items:
+            $ref: "#/components/schemas/CopilotActionTypeStats"
+        conversion:
+          $ref: "#/components/schemas/CopilotConversionComparison"
+        totalFeedback:
           type: number
     PlaybookRules:
       type: object

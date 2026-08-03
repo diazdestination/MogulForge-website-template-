@@ -12,6 +12,7 @@ import { deleteTestOrgs } from "../test-helpers/delete-test-orgs";
 
 import * as crm from "./crm";
 import {
+  getCopilotPerformance,
   getNextBestAction,
   listTodayActions,
   recordActionFeedback,
@@ -229,6 +230,84 @@ describe("next-best-action copilot", () => {
       expect(ok).toBe(false);
     } finally {
       await deleteTestOrgs(otherOrg.id);
+    }
+  });
+
+  it("aggregates copilot performance by action type and compares acted-on vs dismissed conversion, org-scoped", async () => {
+    const [perfOrg] = await db
+      .insert(organizationsTable)
+      .values({ name: "NBA Perf Org", slug: `test-nba-perf-${Date.now()}` })
+      .returning();
+    try {
+      const mkLead = async (status: string) => {
+        const contact = await crm.createContact(perfOrg.id, {
+          firstName: "Perf",
+          lastName: "Lead",
+          email: "perf@test.example",
+        });
+        const lead = await crm.createLead(perfOrg.id, {
+          contactId: contact.id,
+          score: 50,
+          urgency: "normal" as never,
+          status: status as never,
+          summary: null,
+          serviceType: null,
+        });
+        return lead!;
+      };
+      // Acted-on lead that won, acted-on lead still open,
+      // dismissed-only lead that lost.
+      const actedWon = await mkLead("won");
+      const actedOpen = await mkLead("follow_up");
+      const dismissedLost = await mkLead("lost");
+      await db.insert(nextActionFeedbackTable).values([
+        { organizationId: perfOrg.id, leadId: actedWon.id, actionType: "call_now", response: "sent" },
+        { organizationId: perfOrg.id, leadId: actedWon.id, actionType: "send_message", response: "edited" },
+        { organizationId: perfOrg.id, leadId: actedOpen.id, actionType: "call_now", response: "sent" },
+        { organizationId: perfOrg.id, leadId: actedOpen.id, actionType: "call_now", response: "dismissed" },
+        { organizationId: perfOrg.id, leadId: dismissedLost.id, actionType: "send_message", response: "dismissed" },
+        { organizationId: perfOrg.id, leadId: dismissedLost.id, actionType: "schedule_follow_up", response: "snoozed" },
+      ]);
+
+      const perf = await getCopilotPerformance(perfOrg.id);
+      expect(perf.totalFeedback).toBe(6);
+
+      const callNow = perf.byActionType.find((r) => r.actionType === "call_now");
+      expect(callNow).toMatchObject({ sent: 2, edited: 0, snoozed: 0, dismissed: 1, total: 3 });
+      expect(callNow!.acceptanceRate).toBeCloseTo(2 / 3);
+      const sendMsg = perf.byActionType.find((r) => r.actionType === "send_message");
+      expect(sendMsg).toMatchObject({ sent: 0, edited: 1, dismissed: 1, total: 2 });
+      const sched = perf.byActionType.find((r) => r.actionType === "schedule_follow_up");
+      expect(sched).toMatchObject({ snoozed: 1, total: 1, acceptanceRate: 0 });
+
+      expect(perf.conversion).toEqual({
+        actedLeads: 2,
+        actedWon: 1,
+        dismissedLeads: 1,
+        dismissedWon: 0,
+      });
+
+      // Org isolation: the main test org's feedback never leaks in, and an
+      // empty org reports all zeros.
+      const [emptyOrg] = await db
+        .insert(organizationsTable)
+        .values({ name: "NBA Empty Org", slug: `test-nba-empty-${Date.now()}` })
+        .returning();
+      try {
+        const empty = await getCopilotPerformance(emptyOrg.id);
+        expect(empty.totalFeedback).toBe(0);
+        expect(empty.byActionType).toEqual([]);
+        expect(empty.conversion).toEqual({
+          actedLeads: 0,
+          actedWon: 0,
+          dismissedLeads: 0,
+          dismissedWon: 0,
+        });
+      } finally {
+        await deleteTestOrgs(emptyOrg.id);
+      }
+    } finally {
+      await deleteTestOrgs(perfOrg.id);
     }
   });
 });

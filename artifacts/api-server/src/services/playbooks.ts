@@ -25,10 +25,11 @@ import { draftOutreachMessage, providers } from "./providers";
 import {
   checkSendEligibility,
   handleProviderFailure,
+  nextAllowedSendTime,
   recordBlockedSend,
   unsubscribeFooter,
 } from "./send-gate";
-import { getOrgSettings } from "./settings";
+import { getOrgSettings, getSendingHours } from "./settings";
 
 /**
  * Closer Engine playbooks: every new lead is auto-enrolled in a matching
@@ -199,7 +200,11 @@ export async function enrollLead(
 ): Promise<PlaybookEnrollment | null> {
   const firstStep = playbook.steps[0];
   if (!firstStep) return null;
-  const runAt = new Date(Date.now() + firstStep.delayMinutes * 60_000);
+  let runAt = new Date(Date.now() + firstStep.delayMinutes * 60_000);
+  // Never schedule the first touch outside the org's permitted sending
+  // window (e.g. a lead captured at 2am waits until 8am local).
+  const sendingHours = await getSendingHours(organizationId);
+  runAt = nextAllowedSendTime(sendingHours, runAt) ?? runAt;
   try {
     const [enrollment] = await db
       .insert(playbookEnrollmentsTable)
@@ -333,11 +338,13 @@ export async function executePlaybookStep(
   // Unified pre-send eligibility gate (suppressions, DNC, consent, quiet
   // hours, frequency caps) — evaluated BEFORE the step is claimed so a
   // deferral re-queues this same step instead of consuming it.
+  const sendingHours = await getSendingHours(organizationId);
   const gate = await checkSendEligibility({
     organizationId,
     contact,
     channel: step.channel,
     kind: "outreach",
+    sendingHours,
   });
   let gateSkipReason: string | null = null;
   if (!gate.ok) {
@@ -404,11 +411,19 @@ export async function executePlaybookStep(
   // is a skipped touch, never a double send.
   const nextStep = playbook.steps[stepIndex + 1];
   let nextRunAt: Date | null = null;
+  let windowDeferred = false;
   if (nextStep) {
     // Learning loop: nudge the follow-up into the org's best-performing
     // send window once there's enough outcome data (no-op before that).
     const tentative = new Date(Date.now() + nextStep.delayMinutes * 60_000);
-    nextRunAt = (await adjustSendTime(organizationId, tentative)).runAt;
+    nextRunAt = (await adjustSendTime(organizationId, tentative, sendingHours)).runAt;
+    // Never schedule the follow-up outside the org's permitted sending
+    // window: defer it to the next valid local send time.
+    const clamped = nextAllowedSendTime(sendingHours, nextRunAt);
+    if (clamped) {
+      nextRunAt = clamped;
+      windowDeferred = true;
+    }
   }
   const claimed = await db.transaction(async (tx) => {
     const [row] = await tx
@@ -448,6 +463,15 @@ export async function executePlaybookStep(
   });
   if (!claimed) {
     return { status: "skipped", detail: "step already claimed" };
+  }
+  if (windowDeferred && nextRunAt) {
+    await appendHistory(enrollment.id, {
+      at: new Date().toISOString(),
+      kind: "deferred",
+      stepIndex: stepIndex + 1,
+      channel: nextStep?.channel,
+      detail: `outside sending window; scheduled for ${nextRunAt.toISOString()}`,
+    });
   }
 
   // Channel reachability + SMS consent gate.

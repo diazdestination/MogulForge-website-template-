@@ -6,8 +6,11 @@ import {
   type Playbook,
   type PlaybookStep,
   type PlaybookStepVariant,
+  type SendingHoursSettings,
 } from "@workspace/db";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { isWithinWindow } from "./send-gate";
+import { getSendingHours } from "./settings";
 
 /**
  * Closer Engine learning loop. Every touch's outcome chain (sent → replied
@@ -184,11 +187,15 @@ export async function chooseVariant(
  * Send-window learning: given a tentative runAt for a follow-up step,
  * return a possibly adjusted time in the org's best-performing UTC hour
  * window. Only ever delays within the same 12h horizon (never sends
- * earlier than scheduled, never pushes past MAX_WINDOW_SHIFT_HOURS).
+ * earlier than scheduled, never pushes past MAX_WINDOW_SHIFT_HOURS), and
+ * never picks an hour outside the org's permitted sending window — the
+ * learning loop must not schedule a 3am local send no matter how well
+ * that UTC bucket once performed.
  */
 export async function adjustSendTime(
   organizationId: string,
   runAt: Date,
+  sendingHours?: SendingHoursSettings,
 ): Promise<{ runAt: Date; adjusted: boolean }> {
   const rows = await db
     .select({
@@ -202,7 +209,17 @@ export async function adjustSendTime(
   const totalReplies = rows.reduce((n, r) => n + r.replied, 0);
   if (totalReplies < MIN_WINDOW_SAMPLE) return { runAt, adjusted: false };
 
-  const eligible = rows.filter((r) => r.sent >= MIN_VARIANT_SAMPLE);
+  const cfg = sendingHours ?? (await getSendingHours(organizationId));
+  const eligible = rows
+    .filter((r) => r.sent >= MIN_VARIANT_SAMPLE)
+    .filter((r) => {
+      if (!cfg.quietHoursEnabled) return true;
+      // Only consider hour buckets whose resulting send time lands inside
+      // the org's permitted local sending window.
+      const shift = (r.hour - runAt.getUTCHours() + 24) % 24;
+      if (shift > MAX_WINDOW_SHIFT_HOURS) return false;
+      return isWithinWindow(cfg, new Date(runAt.getTime() + shift * 3_600_000));
+    });
   if (eligible.length < 2) return { runAt, adjusted: false };
   const best = eligible.reduce((a, b) =>
     b.replied / b.sent > a.replied / a.sent ? b : a,

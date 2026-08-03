@@ -5,11 +5,13 @@ import {
   db,
   messageTemplatesTable,
   organizationsTable,
+  DEFAULT_SENDING_HOURS,
 } from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { deleteTestOrgs } from "../test-helpers/delete-test-orgs";
+import { updateOrgSettings } from "./settings";
 
 import {
   createAutomation,
@@ -37,6 +39,11 @@ beforeAll(async () => {
     .values({ name: "Automation Test Org", slug })
     .returning();
   org = row;
+  // These suites run at any wall-clock time: disable the (default-on)
+  // sending window so step execution is deterministic.
+  await updateOrgSettings(org.id, {
+    sendingHours: { ...DEFAULT_SENDING_HOURS, quietHoursEnabled: false },
+  });
 });
 
 afterAll(async () => {

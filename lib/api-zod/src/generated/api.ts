@@ -78,6 +78,11 @@ export const LogoutBrowserSessionResponse = zod.void()
  */
 
 
+
+
+
+
+
 export const ExchangeMobileAuthorizationCodeBody = zod.object({
   "code": zod.string().min(1),
   "code_verifier": zod.string().min(1),
@@ -257,6 +262,8 @@ export const ListKnowledgeEntriesResponse = zod.array(ListKnowledgeEntriesRespon
  */
 
 
+
+
 export const CreateKnowledgeEntryBody = zod.object({
   "category": zod.enum(['company', 'service', 'service_area', 'hours', 'faq', 'financing', 'warranty', 'policy', 'escalation', 'disclaimer', 'brand_voice']),
   "title": zod.string().min(1),
@@ -282,6 +289,9 @@ export const CreateKnowledgeEntryResponse = zod.object({
 export const UpdateKnowledgeEntryParams = zod.object({
   "id": zod.coerce.string()
 })
+
+
+
 
 
 export const UpdateKnowledgeEntryBody = zod.object({
@@ -531,6 +541,7 @@ export const ListApiKeysResponse = zod.array(ListApiKeysResponseItem)
  */
 
 
+
 export const CreateApiKeyBody = zod.object({
   "name": zod.string().min(1),
   "role": zod.enum(['owner', 'admin', 'sales_manager', 'sales_rep', 'inspector', 'production', 'office', 'viewer']).optional().describe('Access level the key is capped at (defaults to office).'),
@@ -557,6 +568,8 @@ export const CreateApiKeyResponse = zod.object({
 export const UpdateApiKeyParams = zod.object({
   "id": zod.uuid()
 })
+
+
 
 
 export const UpdateApiKeyBody = zod.object({
@@ -610,6 +623,9 @@ export const ListContactsResponseItem = zod.object({
 export const ListContactsResponse = zod.array(ListContactsResponseItem)
 
 
+
+
+
 export const CreateContactBody = zod.object({
   "firstName": zod.string().min(1),
   "lastName": zod.string().optional(),
@@ -654,6 +670,8 @@ export const GetContactResponse = zod.object({
 export const UpdateContactParams = zod.object({
   "id": zod.uuid()
 })
+
+
 
 
 export const UpdateContactBody = zod.object({
@@ -709,6 +727,12 @@ export const ListPropertiesResponseItem = zod.object({
 export const ListPropertiesResponse = zod.array(ListPropertiesResponseItem)
 
 
+
+
+
+
+
+
 export const CreatePropertyBody = zod.object({
   "contactId": zod.uuid().optional(),
   "addressLine1": zod.string().min(1),
@@ -760,6 +784,11 @@ export const GetPropertyResponse = zod.object({
 export const UpdatePropertyParams = zod.object({
   "id": zod.uuid()
 })
+
+
+
+
+
 
 
 export const UpdatePropertyBody = zod.object({
@@ -880,6 +909,7 @@ export const CreateLeadResponse = zod.object({
 export const bulkUpdateLeadsBodyLeadIdsMax = 200;
 
 
+
 export const BulkUpdateLeadsBody = zod.object({
   "leadIds": zod.array(zod.uuid()).min(1).max(bulkUpdateLeadsBodyLeadIdsMax),
   "action": zod.object({
@@ -963,6 +993,7 @@ export const ListSavedFiltersResponse = zod.array(ListSavedFiltersResponseItem)
  * @summary Save a filter preset for the current user
  */
 export const createSavedFilterBodyNameMax = 80;
+
 
 
 export const CreateSavedFilterBody = zod.object({
@@ -1117,6 +1148,7 @@ export const listEstimatesResponseLineItemsItemUnitPriceCentsMin = 0;
 export const listEstimatesResponseLineItemsItemTotalCentsMin = 0;
 
 
+
 export const ListEstimatesResponseItem = zod.object({
   "id": zod.uuid(),
   "organizationId": zod.uuid(),
@@ -1142,6 +1174,7 @@ export const ListEstimatesResponseItem = zod.object({
 export const ListEstimatesResponse = zod.array(ListEstimatesResponseItem)
 
 
+
 export const createEstimateBodyLineItemsItemQuantityMin = 0;
 
 export const createEstimateBodyLineItemsItemUnitPriceCentsMin = 0;
@@ -1149,6 +1182,7 @@ export const createEstimateBodyLineItemsItemUnitPriceCentsMin = 0;
 export const createEstimateBodyLineItemsItemTotalCentsMin = 0;
 
 export const createEstimateBodyTaxCentsMin = 0;
+
 
 
 export const CreateEstimateBody = zod.object({
@@ -1170,6 +1204,7 @@ export const createEstimateResponseLineItemsItemQuantityMin = 0;
 export const createEstimateResponseLineItemsItemUnitPriceCentsMin = 0;
 
 export const createEstimateResponseLineItemsItemTotalCentsMin = 0;
+
 
 
 export const CreateEstimateResponse = zod.object({
@@ -1205,6 +1240,7 @@ export const getEstimateResponseLineItemsItemQuantityMin = 0;
 export const getEstimateResponseLineItemsItemUnitPriceCentsMin = 0;
 
 export const getEstimateResponseLineItemsItemTotalCentsMin = 0;
+
 
 
 export const GetEstimateResponse = zod.object({
@@ -1245,6 +1281,7 @@ export const updateEstimateBodyLineItemsItemTotalCentsMin = 0;
 export const updateEstimateBodyTaxCentsMin = 0;
 
 
+
 export const UpdateEstimateBody = zod.object({
   "title": zod.string().min(1).optional(),
   "status": zod.enum(['draft', 'sent', 'accepted', 'declined']).optional(),
@@ -1263,6 +1300,7 @@ export const updateEstimateResponseLineItemsItemQuantityMin = 0;
 export const updateEstimateResponseLineItemsItemUnitPriceCentsMin = 0;
 
 export const updateEstimateResponseLineItemsItemTotalCentsMin = 0;
+
 
 
 export const UpdateEstimateResponse = zod.object({
@@ -1320,6 +1358,9 @@ export const ListProjectsResponseItem = zod.object({
 export const ListProjectsResponse = zod.array(ListProjectsResponseItem)
 
 
+
+
+
 export const CreateProjectBody = zod.object({
   "leadId": zod.uuid(),
   "estimateId": zod.uuid().optional(),
@@ -1374,6 +1415,8 @@ export const GetProjectResponse = zod.object({
 export const UpdateProjectParams = zod.object({
   "id": zod.uuid()
 })
+
+
 
 
 export const UpdateProjectBody = zod.object({
@@ -1435,6 +1478,9 @@ export const CreateLeadActivityParams = zod.object({
 })
 
 
+
+
+
 export const CreateLeadActivityBody = zod.object({
   "type": zod.string().min(1),
   "title": zod.string().min(1),
@@ -1462,6 +1508,9 @@ export const CreateLeadActivityResponse = zod.object({
 export const SendLeadEmailParams = zod.object({
   "id": zod.uuid()
 })
+
+
+
 
 
 export const SendLeadEmailBody = zod.object({
@@ -1496,6 +1545,7 @@ export const requestLeadPhotoUploadUrlBodyNameMax = 300;
 export const requestLeadPhotoUploadUrlBodySizeMax = 10485760;
 
 
+
 export const RequestLeadPhotoUploadUrlBody = zod.object({
   "name": zod.string().min(1).max(requestLeadPhotoUploadUrlBodyNameMax),
   "size": zod.int().min(1).max(requestLeadPhotoUploadUrlBodySizeMax),
@@ -1518,6 +1568,7 @@ export const AttachLeadPhotosParams = zod.object({
 
 export const attachLeadPhotosBodyPhotoPathsItemRegExp = new RegExp('^/objects/.+');
 export const attachLeadPhotosBodyPhotoPathsMax = 20;
+
 
 
 export const AttachLeadPhotosBody = zod.object({
@@ -1579,6 +1630,9 @@ export const ListTasksResponseItem = zod.object({
 export const ListTasksResponse = zod.array(ListTasksResponseItem)
 
 
+
+
+
 export const CreateTaskBody = zod.object({
   "title": zod.string().min(1),
   "description": zod.string().optional(),
@@ -1610,6 +1664,8 @@ export const CreateTaskResponse = zod.object({
 export const UpdateTaskParams = zod.object({
   "id": zod.uuid()
 })
+
+
 
 
 export const UpdateTaskBody = zod.object({
@@ -1776,6 +1832,7 @@ export const GetAssistantHistoryResponse = zod.object({
 export const saveAssistantHistoryBodyMessagesMax = 40;
 
 
+
 export const SaveAssistantHistoryBody = zod.object({
   "messages": zod.array(zod.object({
   "role": zod.enum(['user', 'assistant']),
@@ -1799,6 +1856,7 @@ export const SaveAssistantHistoryResponse = zod.object({
 export const sendAssistantChatBodyMessagesItemContentMax = 4000;
 
 export const sendAssistantChatBodyMessagesMax = 40;
+
 
 
 export const SendAssistantChatBody = zod.object({
@@ -1839,6 +1897,7 @@ export const ListAuditEventsResponse = zod.array(ListAuditEventsResponseItem)
 export const submitAssessmentBodyPhoneMin = 7;
 
 
+
 export const submitAssessmentBodyStateMin = 2;
 
 export const submitAssessmentBodyPostalCodeMin = 3;
@@ -1846,6 +1905,7 @@ export const submitAssessmentBodyPostalCodeMin = 3;
 
 export const submitAssessmentBodyPhotoPathsItemRegExp = new RegExp('^/objects/.+');
 export const submitAssessmentBodyPhotoPathsMax = 10;
+
 
 
 export const SubmitAssessmentBody = zod.object({
@@ -1898,6 +1958,7 @@ export const requestPublicUploadUrlBodyNameMax = 300;
 export const requestPublicUploadUrlBodySizeMax = 10485760;
 
 
+
 export const RequestPublicUploadUrlBody = zod.object({
   "name": zod.string().min(1).max(requestPublicUploadUrlBodyNameMax),
   "size": zod.int().min(1).max(requestPublicUploadUrlBodySizeMax),
@@ -1925,6 +1986,7 @@ export const GetStorageObjectResponse = zod.unknown()
  */
 export const checkStormActivityBodyAddressMin = 5;
 export const checkStormActivityBodyAddressMax = 300;
+
 
 
 export const CheckStormActivityBody = zod.object({
@@ -1985,6 +2047,7 @@ export const SendConciergeMessageParams = zod.object({
 export const sendConciergeMessageBodyContentMax = 2000;
 
 
+
 export const SendConciergeMessageBody = zod.object({
   "content": zod.string().min(1).max(sendConciergeMessageBodyContentMax)
 })
@@ -2043,6 +2106,7 @@ export const ListLeadConversationsResponse = zod.array(ListLeadConversationsResp
 /**
  * @summary Capture a first-party analytics event
  */
+
 
 
 export const TrackAnalyticsEventBody = zod.object({
@@ -2125,6 +2189,7 @@ export const GetPublicWidgetConfigResponse = zod.object({
 export const submitWidgetLeadBodyPhoneMin = 7;
 
 
+
 export const SubmitWidgetLeadBody = zod.object({
   "firstName": zod.string().min(1),
   "lastName": zod.string().optional(),
@@ -2167,6 +2232,7 @@ export const RecordWidgetHeartbeatResponse = zod.void()
 export const getPublicGoogleReviewsResponseReviewsItemRatingMax = 5;
 
 
+
 export const GetPublicGoogleReviewsResponse = zod.object({
   "reviews": zod.array(zod.object({
   "reviewerName": zod.string().describe('First name + last initial, e.g. \'John D.\''),
@@ -2184,6 +2250,7 @@ export const GetPublicGoogleReviewsResponse = zod.object({
  */
 export const getMarketingSummaryQueryDaysDefault = 30;
 export const getMarketingSummaryQueryDaysMax = 365;
+
 
 
 export const GetMarketingSummaryQueryParams = zod.object({
@@ -2317,6 +2384,7 @@ export const GetSettingsResponse = zod.object({
  * @summary Update organization settings
  */
 export const updateSettingsBodyAiInstructionsMax = 4000;
+
 
 
 export const UpdateSettingsBody = zod.object({
@@ -2575,6 +2643,8 @@ export const ListTemplatesResponse = zod.array(ListTemplatesResponseItem)
  */
 
 
+
+
 export const CreateTemplateBody = zod.object({
   "name": zod.string().min(1),
   "channel": zod.enum(['email', 'sms']),
@@ -2599,6 +2669,9 @@ export const CreateTemplateResponse = zod.object({
 export const UpdateTemplateParams = zod.object({
   "id": zod.uuid()
 })
+
+
+
 
 
 export const UpdateTemplateBody = zod.object({
@@ -2653,6 +2726,8 @@ export const ListAutomationsResponse = zod.array(ListAutomationsResponseItem)
  */
 
 
+
+
 export const CreateAutomationBody = zod.object({
   "name": zod.string().min(1),
   "event": zod.string().min(1),
@@ -2684,6 +2759,9 @@ export const CreateAutomationResponse = zod.object({
 export const UpdateAutomationParams = zod.object({
   "id": zod.uuid()
 })
+
+
+
 
 
 export const UpdateAutomationBody = zod.object({
@@ -2782,6 +2860,7 @@ export const ListPlaybooksResponse = zod.array(ListPlaybooksResponseItem)
  */
 
 
+
 export const CreatePlaybookBody = zod.object({
   "name": zod.string().min(1),
   "isActive": zod.boolean().optional(),
@@ -2838,6 +2917,8 @@ export const CreatePlaybookResponse = zod.object({
 export const UpdatePlaybookParams = zod.object({
   "id": zod.uuid()
 })
+
+
 
 
 export const UpdatePlaybookBody = zod.object({
@@ -3354,6 +3435,29 @@ export const GetPlaybookInsightsResponse = zod.object({
 
 
 /**
+ * @summary Copilot performance — acceptance rate per action type and a won-rate comparison for acted-on vs dismissed leads
+ */
+export const GetCopilotPerformanceResponse = zod.object({
+  "byActionType": zod.array(zod.object({
+  "actionType": zod.string(),
+  "sent": zod.number(),
+  "edited": zod.number(),
+  "snoozed": zod.number(),
+  "dismissed": zod.number(),
+  "total": zod.number(),
+  "acceptanceRate": zod.number().nullish()
+})),
+  "conversion": zod.object({
+  "actedLeads": zod.number(),
+  "actedWon": zod.number(),
+  "dismissedLeads": zod.number(),
+  "dismissedWon": zod.number()
+}),
+  "totalFeedback": zod.number()
+})
+
+
+/**
  * @summary Next best action for a lead, with an AI draft when it's a message
  */
 export const GetLeadNextActionParams = zod.object({
@@ -3501,6 +3605,7 @@ export const RotateWebhookSecretParams = zod.object({
 export const rotateWebhookSecretBodyGracePeriodHoursMin = 0;
 
 
+
 export const RotateWebhookSecretBody = zod.object({
   "gracePeriodHours": zod.int().min(rotateWebhookSecretBodyGracePeriodHoursMin).optional().describe('Hours the old secret keeps being honored alongside the new one (deliveries carry both signatures). 0 revokes it immediately. Defaults to 24; capped at 168 (7 days).')
 })
@@ -3573,6 +3678,7 @@ export const ListTagsResponse = zod.array(ListTagsResponseItem)
  */
 
 
+
 export const CreateTagBody = zod.object({
   "name": zod.string().min(1),
   "color": zod.string().optional()
@@ -3590,6 +3696,7 @@ export const CreateTagResponse = zod.object({
  */
 export const requestPortalLoginCodeBodyIdentifierMin = 3;
 export const requestPortalLoginCodeBodyIdentifierMax = 254;
+
 
 
 export const RequestPortalLoginCodeBody = zod.object({
@@ -3610,6 +3717,7 @@ export const verifyPortalLoginCodeBodyIdentifierMax = 254;
 
 export const verifyPortalLoginCodeBodyCodeMin = 6;
 export const verifyPortalLoginCodeBodyCodeMax = 6;
+
 
 
 export const VerifyPortalLoginCodeBody = zod.object({
@@ -3691,6 +3799,7 @@ export const SendPortalMessageHeader = zod.object({
 export const sendPortalMessageBodyContentMax = 2000;
 
 
+
 export const SendPortalMessageBody = zod.object({
   "content": zod.string().min(1).max(sendPortalMessageBodyContentMax)
 })
@@ -3736,6 +3845,7 @@ export const addPortalClaimPhotosBodyPhotoPathsItemRegExp = new RegExp('^/object
 export const addPortalClaimPhotosBodyPhotoPathsMax = 10;
 
 
+
 export const AddPortalClaimPhotosBody = zod.object({
   "photoPaths": zod.array(zod.string().regex(addPortalClaimPhotosBodyPhotoPathsItemRegExp)).min(1).max(addPortalClaimPhotosBodyPhotoPathsMax).describe('Object paths of damage photos uploaded via the public upload endpoint.')
 })
@@ -3769,4 +3879,5 @@ export const LogoutPortalSessionHeader = zod.object({
 export const LogoutPortalSessionResponse = zod.object({
   "ok": zod.boolean()
 })
+
 

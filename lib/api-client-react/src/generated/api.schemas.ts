@@ -2074,6 +2074,29 @@ export interface ConversionInsights {
   totalTouches: number;
 }
 
+export interface CopilotActionTypeStats {
+  actionType: string;
+  sent: number;
+  edited: number;
+  snoozed: number;
+  dismissed: number;
+  total: number;
+  acceptanceRate?: number | null;
+}
+
+export interface CopilotConversionComparison {
+  actedLeads: number;
+  actedWon: number;
+  dismissedLeads: number;
+  dismissedWon: number;
+}
+
+export interface CopilotPerformance {
+  byActionType: CopilotActionTypeStats[];
+  conversion: CopilotConversionComparison;
+  totalFeedback: number;
+}
+
 export interface PlaybookRules {
   minScore?: number | null;
   urgencies?: string[];
@@ -2688,3 +2711,4 @@ endpointId?: string;
 export type LogoutPortalSession200 = {
   ok: boolean;
 };
+

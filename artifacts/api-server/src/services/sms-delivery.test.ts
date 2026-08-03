@@ -11,11 +11,13 @@ import {
   consentRecordsTable,
   db,
   organizationsTable,
+  DEFAULT_SENDING_HOURS,
 } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { deleteTestOrgs } from "../test-helpers/delete-test-orgs";
+import { updateOrgSettings } from "./settings";
 
 import { createAutomation, runEvent } from "./automation";
 import * as crm from "./crm";
@@ -135,6 +137,11 @@ describe("automation → send_sms → Twilio round-trip", () => {
       .values({ name: "SMS Delivery Test Org", slug: `test-sms-${Date.now()}` })
       .returning();
     org = row;
+  // These suites run at any wall-clock time: disable the (default-on)
+  // sending window so step execution is deterministic.
+  await updateOrgSettings(org.id, {
+    sendingHours: { ...DEFAULT_SENDING_HOURS, quietHoursEnabled: false },
+  });
   });
 
   afterAll(async () => {
