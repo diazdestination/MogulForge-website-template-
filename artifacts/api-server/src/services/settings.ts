@@ -1,14 +1,22 @@
 import {
   DEFAULT_APPOINTMENT_REMINDER,
+  DEFAULT_PLAYBOOK_STAGE_BEHAVIORS,
+  STAGE_BEHAVIOR_ACTIONS,
+  type PlaybookStageBehaviors,
+  type StageBehavior,
   DEFAULT_CONCIERGE_SETTINGS,
   type ConciergeIntent,
   type ConciergeSettings,
   DEFAULT_INSPECTION_AVAILABILITY,
   DEFAULT_LEAD_SCORING,
   DEFAULT_SENDING_HOURS,
+  GENERIC_APPOINTMENT_REMINDER,
+  GENERIC_CONCIERGE_SETTINGS,
+  GENERIC_LEAD_SCORING,
   type SendingHoursSettings,
   db,
   orgSettingsTable,
+  organizationsTable,
   type AppointmentReminderSettings,
   type InspectionAvailabilitySettings,
   type LeadScoringSettings,
@@ -17,6 +25,7 @@ import {
   type ServiceEntry,
 } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { isLegacyDefaultOrg } from "../lib/orgFlavor";
 
 /**
  * Legacy service slugs migrated to their canonical form. The website's rich
@@ -114,22 +123,42 @@ export async function getOrgSettings(organizationId: string): Promise<OrgSetting
       .returning();
     return updated ?? { ...existing, services: normalized };
   }
+  // Lazily created rows get flavor-appropriate seeds: the legacy default org
+  // keeps its historical (Painless roofing) profile; every other org starts
+  // industry-neutral — its own name, no borrowed phone/city/services.
+  const legacy = await isLegacyDefaultOrg(organizationId);
+  const [org] = await db
+    .select({ name: organizationsTable.name })
+    .from(organizationsTable)
+    .where(eq(organizationsTable.id, organizationId));
   const [created] = await db
     .insert(orgSettingsTable)
-    .values({
-      organizationId,
-      businessProfile: {
-        businessName: "Painless Roofing & Water Restoration",
-        phone: "(404) 444-4476",
-        city: "Canton",
-        state: "GA",
-        postalCode: "30115",
-        hours: "24/7",
-        emergencyAvailability: true,
-      },
-      services: DEFAULT_SERVICES,
-      serviceAreas: DEFAULT_SERVICE_AREAS,
-    })
+    .values(
+      legacy
+        ? {
+            organizationId,
+            businessProfile: {
+              businessName: "Painless Roofing & Water Restoration",
+              phone: "(404) 444-4476",
+              city: "Canton",
+              state: "GA",
+              postalCode: "30115",
+              hours: "24/7",
+              emergencyAvailability: true,
+            },
+            services: DEFAULT_SERVICES,
+            serviceAreas: DEFAULT_SERVICE_AREAS,
+          }
+        : {
+            organizationId,
+            businessProfile: { businessName: org?.name ?? "" },
+            services: [],
+            serviceAreas: [],
+            leadScoring: GENERIC_LEAD_SCORING,
+            appointmentReminder: GENERIC_APPOINTMENT_REMINDER,
+            concierge: GENERIC_CONCIERGE_SETTINGS,
+          },
+    )
     .onConflictDoNothing()
     .returning();
   if (created) return created;
@@ -148,6 +177,9 @@ export async function getOrgSettings(organizationId: string): Promise<OrgSetting
 export async function ensureDefaultServiceAreas(
   organizationId: string,
 ): Promise<void> {
+  // Only the legacy default org tracks the roofing website's GA area list;
+  // fresh orgs define their own areas in onboarding.
+  if (!(await isLegacyDefaultOrg(organizationId))) return;
   const settings = await getOrgSettings(organizationId);
   const updated = normalizeAreas(settings.serviceAreas ?? []);
   if (!updated) return;
@@ -174,6 +206,7 @@ export async function updateOrgSettings(
       | "googleReviews"
       | "widget"
       | "sendingHours"
+      | "playbookStageBehaviors"
     >
   >,
 ): Promise<OrgSettings> {
@@ -208,17 +241,38 @@ export async function getSendingHours(
   return merged;
 }
 
+/**
+ * Effective pipeline-stage → playbook behavior map: org overrides merged
+ * over the built-in defaults (which preserve historical behavior exactly),
+ * sanitized so the engine always sees a valid action. An "enroll" entry
+ * without a target playbook degrades to "complete" (the old behavior).
+ */
+export async function getPlaybookStageBehaviors(
+  organizationId: string,
+): Promise<PlaybookStageBehaviors> {
+  const settings = await getOrgSettings(organizationId);
+  const raw = settings.playbookStageBehaviors ?? {};
+  const merged: PlaybookStageBehaviors = { ...DEFAULT_PLAYBOOK_STAGE_BEHAVIORS };
+  for (const [stage, entry] of Object.entries(raw)) {
+    const sanitized = sanitizeStageBehavior(entry);
+    if (sanitized) merged[stage] = sanitized;
+  }
+  return merged;
+}
 /** Effective scoring weights: org override merged over defaults. */
 export async function getLeadScoring(
   organizationId: string,
 ): Promise<LeadScoringSettings> {
   const settings = await getOrgSettings(organizationId);
-  if (!settings.leadScoring) return DEFAULT_LEAD_SCORING;
+  const defaults = (await isLegacyDefaultOrg(organizationId))
+    ? DEFAULT_LEAD_SCORING
+    : GENERIC_LEAD_SCORING;
+  if (!settings.leadScoring) return defaults;
   return {
-    ...DEFAULT_LEAD_SCORING,
+    ...defaults,
     ...settings.leadScoring,
     intentPoints: {
-      ...DEFAULT_LEAD_SCORING.intentPoints,
+      ...defaults.intentPoints,
       ...settings.leadScoring.intentPoints,
     },
   };
@@ -282,22 +336,22 @@ export async function getAppointmentReminderSettings(
   organizationId: string,
 ): Promise<AppointmentReminderSettings> {
   const settings = await getOrgSettings(organizationId);
+  const defaults = (await isLegacyDefaultOrg(organizationId))
+    ? DEFAULT_APPOINTMENT_REMINDER
+    : GENERIC_APPOINTMENT_REMINDER;
   const raw = settings.appointmentReminder;
-  if (!raw) return DEFAULT_APPOINTMENT_REMINDER;
-  const merged = { ...DEFAULT_APPOINTMENT_REMINDER, ...raw };
+  if (!raw) return defaults;
+  const merged = { ...defaults, ...raw };
   const leadTimeHours = Number.isFinite(merged.leadTimeHours)
     ? Math.min(MAX_REMINDER_LEAD_HOURS, Math.max(1, merged.leadTimeHours))
-    : DEFAULT_APPOINTMENT_REMINDER.leadTimeHours;
+    : defaults.leadTimeHours;
   const nonEmpty = (value: string, fallback: string) =>
     typeof value === "string" && value.trim().length > 0 ? value : fallback;
   return {
     leadTimeHours,
-    smsBody: nonEmpty(merged.smsBody, DEFAULT_APPOINTMENT_REMINDER.smsBody),
-    emailSubject: nonEmpty(
-      merged.emailSubject,
-      DEFAULT_APPOINTMENT_REMINDER.emailSubject,
-    ),
-    emailBody: nonEmpty(merged.emailBody, DEFAULT_APPOINTMENT_REMINDER.emailBody),
+    smsBody: nonEmpty(merged.smsBody, defaults.smsBody),
+    emailSubject: nonEmpty(merged.emailSubject, defaults.emailSubject),
+    emailBody: nonEmpty(merged.emailBody, defaults.emailBody),
   };
 }
 
@@ -310,6 +364,9 @@ export async function getConciergeSettings(
   organizationId: string,
 ): Promise<Required<ConciergeSettings>> {
   const settings = await getOrgSettings(organizationId);
+  const DEFAULTS = (await isLegacyDefaultOrg(organizationId))
+    ? DEFAULT_CONCIERGE_SETTINGS
+    : GENERIC_CONCIERGE_SETTINGS;
   const raw = settings.concierge ?? {};
   const nonEmpty = (value: string | undefined, fallback: string) =>
     typeof value === "string" && value.trim().length > 0 ? value : fallback;
@@ -341,25 +398,55 @@ export async function getConciergeSettings(
         .map((k) => k.trim().toLowerCase()),
     }));
   return {
-    assistantName: nonEmpty(raw.assistantName, DEFAULT_CONCIERGE_SETTINGS.assistantName),
-    greeting: nonEmpty(raw.greeting, DEFAULT_CONCIERGE_SETTINGS.greeting),
-    intents: intents.length > 0 ? intents : DEFAULT_CONCIERGE_SETTINGS.intents,
-    intakeDisclaimer: nonEmpty(raw.intakeDisclaimer, DEFAULT_CONCIERGE_SETTINGS.intakeDisclaimer),
-    emergencySafety: nonEmpty(raw.emergencySafety, DEFAULT_CONCIERGE_SETTINGS.emergencySafety),
+    assistantName: nonEmpty(raw.assistantName, DEFAULTS.assistantName),
+    greeting: nonEmpty(raw.greeting, DEFAULTS.greeting),
+    intents: intents.length > 0 ? intents : DEFAULTS.intents,
+    intakeDisclaimer: nonEmpty(raw.intakeDisclaimer, DEFAULTS.intakeDisclaimer),
+    emergencySafety: nonEmpty(raw.emergencySafety, DEFAULTS.emergencySafety),
     emergencyEscalation: nonEmpty(
       raw.emergencyEscalation,
-      DEFAULT_CONCIERGE_SETTINGS.emergencyEscalation,
+      DEFAULTS.emergencyEscalation,
     ),
     unknownAnswerFallback: nonEmpty(
       raw.unknownAnswerFallback,
-      DEFAULT_CONCIERGE_SETTINGS.unknownAnswerFallback,
+      DEFAULTS.unknownAnswerFallback,
     ),
-    wrapUpNote: nonEmpty(raw.wrapUpNote, DEFAULT_CONCIERGE_SETTINGS.wrapUpNote),
+    wrapUpNote: nonEmpty(raw.wrapUpNote, DEFAULTS.wrapUpNote),
   };
+}
+
+/**
+ * Effective display/business name for outbound copy: the org's business
+ * profile name, falling back to the organization record's name. Never
+ * borrows another tenant's branding.
+ */
+export async function getBusinessName(organizationId: string): Promise<string> {
+  const settings = await getOrgSettings(organizationId);
+  const fromProfile = settings.businessProfile?.businessName?.trim();
+  if (fromProfile) return fromProfile;
+  const [org] = await db
+    .select({ name: organizationsTable.name })
+    .from(organizationsTable)
+    .where(eq(organizationsTable.id, organizationId));
+  return org?.name?.trim() || "our team";
 }
 
 /** Org-specific extra AI instructions (empty string when unset). */
 export async function getAiInstructions(organizationId: string): Promise<string> {
   const settings = await getOrgSettings(organizationId);
   return settings.aiInstructions?.trim() ?? "";
+}
+
+function sanitizeStageBehavior(entry: unknown): StageBehavior | null {
+  if (!entry || typeof entry !== "object") return null;
+  const action = (entry as StageBehavior).action;
+  if (!STAGE_BEHAVIOR_ACTIONS.includes(action)) return null;
+  if (action === "enroll") {
+    const target = (entry as StageBehavior).enrollPlaybookId;
+    if (typeof target !== "string" || target.trim().length === 0) {
+      return { action: "complete" };
+    }
+    return { action, enrollPlaybookId: target };
+  }
+  return { action };
 }

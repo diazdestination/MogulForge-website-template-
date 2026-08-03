@@ -17,6 +17,14 @@ vi.mock("./concierge", () => ({
   markAbandonedConversations: vi.fn(async () => {}),
 }));
 
+// This suite calls processScheduledWork() UNSCOPED; the real reactivation
+// drain would grab running campaigns owned by parallel test workers and
+// enroll their leads out from under them. Neutralize it — stage isolation
+// is what's under test, not draining.
+vi.mock("./reactivation", () => ({
+  drainReactivationCampaigns: vi.fn(async () => {}),
+}));
+
 import { markAbandonedConversations } from "./concierge";
 import { processScheduledWork } from "./automation";
 import {

@@ -11,7 +11,6 @@ import {
 } from "@workspace/api-zod";
 import { analyticsEventsTable, db } from "@workspace/db";
 import { Router, type IRouter, type Request, type Response } from "express";
-import { CLIENT } from "../../lib/client.config";
 
 import {
   ObjectNotFoundError,
@@ -25,7 +24,7 @@ import { emitAutomationEvent } from "../../services/automation";
 import { handleMessage, startConversation } from "../../services/concierge";
 import { renderAreaShareCard } from "../../services/ogCard";
 import { getDefaultOrganization } from "../../services/org";
-import { getOrgSettings } from "../../services/settings";
+import { getBusinessName, getOrgSettings } from "../../services/settings";
 import { providers, transcribeAudio } from "../../services/providers";
 import { recordHeartbeat } from "../../services/installation";
 import { captureWidgetLead, getPublicWidgetConfig } from "../../services/widget";
@@ -36,6 +35,14 @@ import {
 } from "../../services/forms";
 import { CLOSER_JS, CLOSER_JS_VERSION } from "../../widget/closerScript";
 import { FORMS_JS, FORMS_JS_VERSION } from "../../widget/formsScript";
+import { CAPTURE_JS, CAPTURE_JS_VERSION } from "../../widget/captureScript";
+import { captureExternalLead, getEndpointByToken } from "../../services/capture";
+import {
+  findEngagementLink,
+  recordReferralSubmission,
+  recordReviewClick,
+} from "../../services/engagement-links";
+import { SubmitReferralBody } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -280,9 +287,8 @@ router.get(
     const png = renderAreaShareCard({
       city: area.name,
       state: area.state ?? "GA",
-      businessName:
-        profile.businessName?.trim() || CLIENT.defaultOrgName,
-      phone: profile.phone?.trim() || CLIENT.phone,
+      businessName: profile.businessName?.trim() || (await getBusinessName(req.publicOrg!.id)),
+      phone: profile.phone?.trim() || "",
     });
     res
       .status(200)
@@ -497,6 +503,60 @@ router.post(
   },
 );
 
+// ---------- external form capture (capture.js + inbound endpoints) ----------
+
+// Opt-in listener for a client's existing site forms. Like the other embed
+// loaders it carries no org data (the token lives in the script tag).
+router.get(
+  "/public/capture.js",
+  rateLimit({ windowMs: 60_000, max: 120, key: "capture-js" }),
+  (_req: Request, res: Response): void => {
+    res
+      .status(200)
+      .setHeader("Content-Type", "application/javascript; charset=utf-8")
+      .setHeader("Cache-Control", "public, max-age=3600")
+      .setHeader("ETag", `"capture-v${CAPTURE_JS_VERSION}"`)
+      .send(CAPTURE_JS);
+  },
+);
+
+/**
+ * Inbound capture endpoint: accepts JSON (Zapier/Make/n8n webhooks, the
+ * capture.js listener) and form-encoded posts (a form's action pointed
+ * directly at us). The endpoint token identifies the org — no session.
+ * Idempotency: `x-idempotency-key` header or `_idempotencyKey` body field.
+ */
+router.post(
+  "/public/capture/:token",
+  rateLimit({ windowMs: 60_000, max: 30, key: "public-capture" }),
+  async (req: Request, res: Response): Promise<void> => {
+    const endpoint = await getEndpointByToken(String(req.params.token));
+    if (!endpoint) {
+      res.status(404).json({ error: "Unknown capture endpoint" });
+      return;
+    }
+    const body =
+      req.body && typeof req.body === "object" && !Array.isArray(req.body)
+        ? (req.body as Record<string, unknown>)
+        : {};
+    const headerKey = req.headers["x-idempotency-key"];
+    const idempotencyKey =
+      (typeof headerKey === "string" && headerKey) ||
+      (typeof body._idempotencyKey === "string" ? body._idempotencyKey : null);
+    const result = await captureExternalLead(endpoint, body, { idempotencyKey });
+    if (!result.ok) {
+      res.status(422).json({ error: result.error });
+      return;
+    }
+    res.status(result.duplicateDelivery ? 200 : 201).json({
+      ok: true,
+      leadId: result.leadId,
+      outcome: result.outcome,
+      duplicate: result.duplicateDelivery,
+    });
+  },
+);
+
 // Hosted MogulForge form page: a minimal shell that loads the same forms.js
 // runtime used by third-party embeds. The key is public by design; the
 // runtime's fetches are same-origin here, which resolvePublicOrg accepts.
@@ -531,6 +591,67 @@ router.get(
 
 // Local demo page simulating a third-party site with the snippet installed.
 // Everything on it is public information (the key is public by design).
+// ---------- post-sale engagement links (review clicks + referrals) ----------
+// The token alone identifies the org/contact — a capability URL sent only to
+// the customer it belongs to. Clicks and submissions are tracked honestly;
+// completed third-party reviews are never claimed.
+
+router.get(
+  "/public/el/:token",
+  rateLimit({ windowMs: 60_000, max: 30, key: "engagement-link" }),
+  async (req: Request, res: Response): Promise<void> => {
+    const link = await findEngagementLink(String(req.params.token));
+    if (!link || link.kind !== "review") {
+      res.status(404).send("Link not found");
+      return;
+    }
+    const destination = await recordReviewClick(link);
+    res.redirect(302, destination);
+  },
+);
+
+router.get(
+  "/public/referrals/:token",
+  rateLimit({ windowMs: 60_000, max: 30, key: "referral-info" }),
+  async (req: Request, res: Response): Promise<void> => {
+    const link = await findEngagementLink(String(req.params.token));
+    if (!link || link.kind !== "referral") {
+      res.status(404).json({ error: "Link not found" });
+      return;
+    }
+    res.json({ businessName: await getBusinessName(link.organizationId) });
+  },
+);
+
+router.post(
+  "/public/referrals/:token",
+  rateLimit({ windowMs: 60_000, max: 10, key: "referral-submit" }),
+  async (req: Request, res: Response): Promise<void> => {
+    const link = await findEngagementLink(String(req.params.token));
+    if (!link || link.kind !== "referral") {
+      res.status(404).json({ error: "Link not found" });
+      return;
+    }
+    const parsed = SubmitReferralBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid referral" });
+      return;
+    }
+    const { name, email, phone, notes } = parsed.data;
+    if (!email && !phone) {
+      res.status(400).json({ error: "An email or phone number is required" });
+      return;
+    }
+    const result = await recordReferralSubmission(link, {
+      name,
+      email: email ?? undefined,
+      phone: phone ?? undefined,
+      notes: notes ?? undefined,
+    });
+    res.status(201).json({ ok: true, leadId: result.leadId });
+  },
+);
+
 router.get(
   "/public/widget-demo",
   rateLimit({ windowMs: 60_000, max: 30, key: "widget-demo" }),

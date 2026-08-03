@@ -58,8 +58,8 @@ describe("sendInviteEmail", () => {
     expect(send).toHaveBeenCalledOnce();
     const [to, subject, body] = send.mock.calls[0];
     expect(to).toBe("newbie@example.com");
-    // Branding comes from org settings (default business profile).
-    expect(subject).toContain("Painless Roofing");
+    // Branding comes from org settings: fresh orgs default to the org name.
+    expect(subject).toContain("Invite Email Test Org");
     expect(body).toContain("Hi Nia,");
     expect(body).toContain("Ava Admin invited you");
     expect(body).toContain("sales rep");

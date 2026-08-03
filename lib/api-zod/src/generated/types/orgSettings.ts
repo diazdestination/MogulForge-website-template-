@@ -11,6 +11,7 @@ import type { ConciergeSettings } from './conciergeSettings';
 import type { GoogleReviewsConfig } from './googleReviewsConfig';
 import type { InspectionAvailabilitySettings } from './inspectionAvailabilitySettings';
 import type { LeadScoringSettings } from './leadScoringSettings';
+import type { PlaybookStageBehaviors } from './playbookStageBehaviors';
 import type { SendingHoursSettings } from './sendingHoursSettings';
 import type { ServiceAreaEntry } from './serviceAreaEntry';
 import type { ServiceEntry } from './serviceEntry';
@@ -44,5 +45,6 @@ export interface OrgSettings {
   widget?: WidgetSettings | null;
   concierge?: ConciergeSettings | null;
   sendingHours?: SendingHoursSettings | null;
+  playbookStageBehaviors?: PlaybookStageBehaviors | null;
   updatedAt?: string;
 }

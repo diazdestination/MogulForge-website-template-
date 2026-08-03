@@ -7,6 +7,7 @@ import {
 } from "./services/automation";
 import { ensureDefaultServiceAreas, getOrgSettings } from "./services/settings";
 import { ensureInstallation } from "./services/installation";
+import { ensurePlatformAdmins } from "./services/org";
 
 const rawPort = process.env["PORT"];
 
@@ -30,6 +31,10 @@ app.listen(port, (err) => {
 
   logger.info({ port }, "Server listening");
   startAutomationScheduler();
+  // One-time (idempotent) grant: default-org owners become platform admins.
+  void ensurePlatformAdmins().catch((err: unknown) =>
+    logger.error({ err }, "Ensuring platform admins failed"),
+  );
   // One-time (idempotent) seeding of default automations for existing orgs.
   void (async () => {
     const orgs = await db

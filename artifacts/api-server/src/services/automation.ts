@@ -1,4 +1,3 @@
-import { CLIENT } from "../lib/client.config";
 import {
   activitiesTable,
   appointmentsTable,
@@ -20,13 +19,15 @@ import {
 } from "@workspace/db";
 import { and, desc, eq, lte, sql } from "drizzle-orm";
 import { recordAudit } from "./audit";
+import { isLegacyDefaultOrg } from "../lib/orgFlavor";
 import {
+  applyStageBehaviorToLead,
   autoEnrollLead,
   executePlaybookStep,
-  OUTREACH_ACTIVE_STATUSES,
   stopEnrollmentsForLead,
 } from "./playbooks";
 import { recordLeadOutcome } from "./playbook-learning";
+import { classifyWonLead, handlePostSaleTransition } from "./post-sale";
 import { providers } from "./providers";
 import {
   checkSendEligibility,
@@ -34,7 +35,7 @@ import {
   recordBlockedSend,
   unsubscribeFooter,
 } from "./send-gate";
-import { getAppointmentReminderSettings, getOrgSettings } from "./settings";
+import { getAppointmentReminderSettings, getBusinessName, getOrgSettings } from "./settings";
 import {
   cleanupExpiredPreviousSecrets,
   dispatchWebhookEvent,
@@ -94,11 +95,46 @@ export function emitAutomationEvent(
 }
 
 /** Awaitable variant (used by tests and the scheduler). */
+/**
+ * Lead-lifecycle events mirrored to outbound webhook endpoints so outside
+ * systems (Zapier, dialers, spreadsheets) can react in near-real-time.
+ * Dispatch is fire-and-forget — a slow or broken webhook must never delay
+ * CRM work (delivery retries live in the webhook queue itself).
+ */
+function mirrorToWebhooks(
+  organizationId: string,
+  event: string,
+  context: EventContext,
+): void {
+  void dispatchWebhookEvent(organizationId, event, {
+    leadId: context.leadId ?? null,
+    contactId: context.contactId ?? null,
+    appointmentId: context.appointmentId ?? null,
+    ...(context.fields ?? {}),
+  }).catch((err) => {
+    console.error(`[webhooks] lifecycle dispatch ${event} failed:`, err);
+  });
+}
+
 export async function runEvent(
   organizationId: string,
   event: AutomationEventName,
   context: EventContext,
 ): Promise<void> {
+  // Outbound webhook mirror for lifecycle events.
+  if (event === "lead.created" || event === "appointment.booked") {
+    mirrorToWebhooks(organizationId, event, context);
+  }
+  if (event === "lead.updated" || event === "lead.assigned") {
+    const s = context.fields?.["lead.status"];
+    // Only mirror terminal events on a REAL status transition — a non-status
+    // update to an already-won/lost lead must not re-emit the event.
+    // Emitters that don't provide the flag are treated as transitions.
+    const changed = context.fields?.["lead.statusChanged"] !== false;
+    if (changed && (s === "qualified" || s === "won" || s === "lost")) {
+      mirrorToWebhooks(organizationId, `lead.${s}`, context);
+    }
+  }
   // Closer Engine hooks: enroll new leads in an outreach playbook, and
   // stop live enrollments the moment the lead converts or advances.
   if (event === "lead.created" && context.leadId) {
@@ -117,20 +153,36 @@ export async function runEvent(
     context.leadId
   ) {
     const status = context.fields?.["lead.status"];
-    if (
-      typeof status === "string" &&
-      !OUTREACH_ACTIVE_STATUSES.includes(status as never)
-    ) {
+    const statusChanged = context.fields?.["lead.statusChanged"] !== false;
+    if (typeof status === "string") {
+      // Org-configurable stage→behavior map (continue / pause / complete /
+      // cancel / hand off to another playbook) for ACQUISITION sequences.
+      // Defaults preserve the old fixed behavior: outreach stages continue,
+      // everything else completes.
+      await applyStageBehaviorToLead(organizationId, context.leadId, status);
+    }
+    // A lost lead also ends any live post-sale sequence.
+    if (status === "lost") {
       await stopEnrollmentsForLead(
         organizationId,
         context.leadId,
-        `lead moved to ${status}`,
-        "completed",
+        "lead marked lost",
+        "stopped",
+        "post_sale",
       );
     }
     // Learning loop: terminal stages close each touch's outcome chain.
     if (status === "won" || status === "lost") {
       await recordLeadOutcome(organizationId, context.leadId, status);
+    }
+    if (typeof status === "string" && statusChanged) {
+      // Honest revenue attribution is recorded at first win, BEFORE any
+      // post-sale enrollment fires for the same transition.
+      if (status === "won") {
+        await classifyWonLead(organizationId, context.leadId);
+      }
+      // Milestone-gated post-sale playbooks (review/referral/maintenance).
+      await handlePostSaleTransition(organizationId, context.leadId, status);
     }
   }
 
@@ -297,7 +349,7 @@ async function executeAction(
           channel === "email"
             ? await providers.email.send(
                 contact.email!,
-                rendered.subject ?? `${CLIENT.businessShortName} update`,
+                rendered.subject ?? `${await getBusinessName(organizationId)} update`,
                 rendered.body + unsubscribeFooter(organizationId, contact.id),
               )
             : await providers.sms.send(contact.phone!, rendered.body);
@@ -573,7 +625,7 @@ async function executeAction(
 
       const settings = await getOrgSettings(organizationId);
       const businessName =
-        settings.businessProfile.businessName ?? CLIENT.businessShortName;
+        await getBusinessName(organizationId);
       const businessPhone = settings.businessProfile.phone ?? "";
       const windowLabel = new Intl.DateTimeFormat("en-US", {
         timeZone: process.env.CONCIERGE_TIMEZONE ?? "America/New_York",
@@ -829,7 +881,7 @@ async function renderTemplate(
   const vars: Record<string, string> = {
     "contact.firstName": contact?.firstName ?? "there",
     "business.name":
-      settings.businessProfile.businessName ?? CLIENT.businessShortName,
+      await getBusinessName(organizationId),
     "business.phone": settings.businessProfile.phone ?? "",
   };
   for (const [key, value] of Object.entries(context.fields ?? {})) {
@@ -934,13 +986,6 @@ async function processDueScheduledActions(organizationId?: string): Promise<void
  *   pending actions or processing each other's webhook deliveries.
  */
 export async function processScheduledWork(organizationId?: string): Promise<void> {
-  // Throttled reactivation campaigns release their next batch of leads into
-  // playbook sequences before due steps are executed. Dynamic import avoids a
-  // static circular dependency (reactivation → playbooks → automation types).
-  await runStage("reactivation-drain", async () => {
-    const { drainReactivationCampaigns } = await import("./reactivation");
-    await drainReactivationCampaigns(organizationId);
-  });
   await runStage("scheduled-actions", () => processDueScheduledActions(organizationId));
   // Throttled reactivation campaigns release their next batch of leads into
   // playbook sequences (their first step becomes due on a later tick).
@@ -1338,16 +1383,21 @@ export async function ensureDefaultAutomations(
       return;
     }
 
+    // Fresh orgs get industry-neutral copy; only the legacy default org
+    // keeps the historical roofing-flavored templates.
+    const legacy = await isLegacyDefaultOrg(organizationId);
     const smsTemplateId = await seedTemplate({
       name: DEFAULT_ABANDONED_SMS_TEMPLATE_NAME,
       channel: "sms",
-      body: DEFAULT_ABANDONED_SMS_BODY,
+      body: legacy ? DEFAULT_ABANDONED_SMS_BODY : GENERIC_ABANDONED_SMS_BODY,
     });
     const emailTemplateId = await seedTemplate({
       name: DEFAULT_ABANDONED_EMAIL_TEMPLATE_NAME,
       channel: "email",
-      subject: DEFAULT_ABANDONED_EMAIL_SUBJECT,
-      body: DEFAULT_ABANDONED_EMAIL_BODY,
+      subject: legacy
+        ? DEFAULT_ABANDONED_EMAIL_SUBJECT
+        : GENERIC_ABANDONED_EMAIL_SUBJECT,
+      body: legacy ? DEFAULT_ABANDONED_EMAIL_BODY : GENERIC_ABANDONED_EMAIL_BODY,
     });
 
     await tx.insert(automationsTable).values({
@@ -1478,3 +1528,13 @@ const DEFAULT_ABANDONED_EMAIL_SUBJECT =
 
 const DEFAULT_ABANDONED_EMAIL_BODY =
   "Hi {{contact.firstName}},\n\nIt looks like we got disconnected while going over your roof concern. We'd hate for a small issue to turn into a big one — you can pick up your assessment right where you left off, or call {{business.phone}} and we'll get your free inspection on the calendar.\n\n— {{business.name}}";
+
+// Industry-neutral copy seeded for non-legacy orgs (fresh sign-ups).
+const GENERIC_ABANDONED_SMS_BODY =
+  "Hi {{contact.firstName}}, this is {{business.name}} — looks like we got disconnected. Still want a hand? Pick up right where you left off, or call us at {{business.phone}} and we'll get you scheduled.";
+
+const GENERIC_ABANDONED_EMAIL_SUBJECT =
+  "Still there? Let's pick up where we left off";
+
+const GENERIC_ABANDONED_EMAIL_BODY =
+  "Hi {{contact.firstName}},\n\nIt looks like we got disconnected while going over your request. You can pick up right where you left off, or call {{business.phone}} and we'll get you on the calendar.\n\n— {{business.name}}";

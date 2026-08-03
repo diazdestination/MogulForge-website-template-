@@ -19,7 +19,7 @@ const testKeySuffix =
  * return the current count/reset for its fixed window. Expired windows are
  * reset in place, so the row count stays bounded by distinct keys.
  */
-async function incrementShared(
+export async function incrementShared(
   key: string,
   windowMs: number,
 ): Promise<Bucket> {

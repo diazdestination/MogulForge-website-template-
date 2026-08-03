@@ -1,10 +1,12 @@
+import { getBusinessName } from "./settings";
 /**
  * Homeowner portal: OTP login against the contact record (email or phone),
  * portal sessions, and a read view of the homeowner's claims (leads),
  * appointments, and timeline. No staff auth involved.
  */
+import { dispatchWebhookEvent } from "./webhooks";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import { CLIENT } from "../lib/client.config";
+
 
 import {
   activitiesTable,
@@ -137,11 +139,12 @@ export async function requestLoginCode(params: {
     expiresAt: new Date(Date.now() + CODE_TTL_MS),
   });
 
+  const businessName = await getBusinessName(params.organizationId);
   const firstName = contacts[0].firstName;
   const body = [
     `Hi ${firstName},`,
     "",
-    `Your ${CLIENT.businessShortName} portal sign-in code is: ${code}`,
+    `Your ${businessName} portal sign-in code is: ${code}`,
     "",
     "This code expires in 10 minutes. If you didn't request it, you can ignore this message.",
   ].join("\n");
@@ -150,14 +153,14 @@ export async function requestLoginCode(params: {
     if (channel === "email") {
       await providers.email.send(
         identifier,
-        `Your ${CLIENT.businessShortName} sign-in code`,
+        `Your ${businessName} sign-in code`,
         body,
       );
     } else {
       const to = contacts[0].phone ?? identifier;
       await providers.sms.send(
         to,
-        `${CLIENT.businessShortName} sign-in code: ${code}. Expires in 10 minutes.`,
+        `${businessName} sign-in code: ${code}. Expires in 10 minutes.`,
       );
     }
   } catch (err) {
@@ -273,7 +276,7 @@ const JOURNEY_STEPS: {
   {
     key: "inspection",
     label: "Inspection",
-    description: "Your on-site roof inspection is scheduled or under way.",
+    description: "Your on-site inspection is scheduled or under way.",
     statuses: ["inspection_scheduled", "inspection_completed"],
   },
   {
@@ -297,7 +300,7 @@ const JOURNEY_STEPS: {
   {
     key: "wrap_up",
     label: "Final walkthrough & done",
-    description: "Final quality walkthrough, then your roof is complete.",
+    description: "Final quality walkthrough, then your project is complete.",
     statuses: ["final_walkthrough", "completed", "review_requested"],
   },
 ];
@@ -771,6 +774,11 @@ export async function postPortalMessage(params: {
   // Learning loop: credit the reply back to the outreach touches that
   // preceded it (variant/step attribution). Never throws.
   await recordLeadOutcome(params.session.organizationId, lead.id, "replied");
+  // Outbound webhook mirror: outside systems can react to the reply.
+  void dispatchWebhookEvent(params.session.organizationId, "lead.replied", {
+    leadId: lead.id,
+    channel: "portal",
+  }).catch(() => {});
 
   // Notify the assigned rep (if any) so the message doesn't sit unread.
   // Rapid consecutive messages are debounced to at most one email per quiet

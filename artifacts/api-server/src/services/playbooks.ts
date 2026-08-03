@@ -10,12 +10,18 @@ import {
   type EnrollmentHistoryEntry,
   type Lead,
   type Playbook,
+  type PlaybookCategory,
   type PlaybookEnrollment,
   type PlaybookStep,
+  type StageBehavior,
 } from "@workspace/db";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { CLIENT } from "../lib/client.config";
+import { isLegacyDefaultOrg } from "../lib/orgFlavor";
 import { recordAudit } from "./audit";
+import {
+  engagementLinkUrl,
+  getOrCreateEngagementLink,
+} from "./engagement-links";
 import {
   adjustSendTime,
   chooseVariant,
@@ -29,7 +35,12 @@ import {
   recordBlockedSend,
   unsubscribeFooter,
 } from "./send-gate";
-import { getOrgSettings, getSendingHours } from "./settings";
+import {
+  getBusinessName,
+  getOrgSettings,
+  getPlaybookStageBehaviors,
+  getSendingHours,
+} from "./settings";
 
 /**
  * Closer Engine playbooks: every new lead is auto-enrolled in a matching
@@ -46,6 +57,16 @@ export const OUTREACH_ACTIVE_STATUSES = [
   "contact_attempted",
   "follow_up",
   "nurture",
+] as const;
+
+/** Statuses in which a post-sale (review/referral/maintenance) sequence may keep sending. */
+export const POST_SALE_ACTIVE_STATUSES = [
+  "won",
+  "production_scheduled",
+  "in_progress",
+  "final_walkthrough",
+  "completed",
+  "review_requested",
 ] as const;
 
 export const DEFAULT_PLAYBOOK_SEED_KEY = "default.new_lead_outreach";
@@ -87,6 +108,43 @@ const DEFAULT_STEPS: PlaybookStep[] = [
   },
 ];
 
+/** Industry-neutral default sequence for orgs created via self-serve signup. */
+const GENERIC_STEPS: PlaybookStep[] = [
+  {
+    channel: "email",
+    delayMinutes: 5,
+    subject: "We got your request — we're on it",
+    prompt:
+      "First touch, minutes after the prospect asked for help. Warmly confirm we received their request, set the expectation that a real person will reach out shortly, and invite them to reply with any details. Short and human, no pressure.",
+  },
+  {
+    channel: "sms",
+    delayMinutes: 60 * 4,
+    prompt:
+      "Same-day text follow-up. One or two sentences: we're ready to schedule a time to talk and they can reply to this text to pick a time.",
+  },
+  {
+    channel: "email",
+    delayMinutes: 60 * 24,
+    subject: "Ready when you are",
+    prompt:
+      "Day-two follow-up. Gently remind them we're ready to help, mention the specific request they made, and give an easy next step. Helpful, not salesy.",
+  },
+  {
+    channel: "sms",
+    delayMinutes: 60 * 24 * 3,
+    prompt:
+      "Day-five nudge. Brief, friendly check-in: still happy to help whenever they're ready.",
+  },
+  {
+    channel: "email",
+    delayMinutes: 60 * 24 * 4,
+    subject: "Should we keep your spot open?",
+    prompt:
+      "Final touch of the sequence, about nine days in. Politely close the loop: we'll stop reaching out but they can reply any time; include a one-line recap of what we can do for them.",
+  },
+];
+
 /**
  * Idempotently seed the default playbook for an org. Keys on
  * (organizationId, seedKey) under a per-org advisory lock, so a renamed,
@@ -110,13 +168,14 @@ export async function ensureDefaultPlaybook(
         ),
       );
     if (existing) return;
+    const legacy = await isLegacyDefaultOrg(organizationId);
     await tx.insert(playbooksTable).values({
       organizationId,
       name: DEFAULT_PLAYBOOK_NAME,
       seedKey: DEFAULT_PLAYBOOK_SEED_KEY,
       isActive: true,
       enrollmentRules: {},
-      steps: DEFAULT_STEPS,
+      steps: legacy ? DEFAULT_STEPS : GENERIC_STEPS,
     });
   });
 }
@@ -174,11 +233,18 @@ export async function autoEnrollLead(
         and(
           eq(playbooksTable.organizationId, organizationId),
           eq(playbooksTable.isActive, true),
+          // Post-sale playbooks are milestone-gated: they enroll only via
+          // handlePostSaleTransition, never at lead creation.
+          eq(playbooksTable.kind, "outreach"),
         ),
       )
       .orderBy(desc(playbooksTable.createdAt));
+    // New-lead auto-enrollment only considers acquisition sequences; other
+    // categories (review requests, reactivation…) are entered by explicit
+    // stage-behavior hand-offs or dedicated flows.
     const match = playbooks.find(
-      (p) => p.steps.length > 0 && rulesMatch(p, lead),
+      (p) =>
+        p.category === "acquisition" && p.steps.length > 0 && rulesMatch(p, lead),
     );
     if (!match) return null;
 
@@ -212,6 +278,8 @@ export async function enrollLead(
         organizationId,
         playbookId: playbook.id,
         leadId,
+        kind: playbook.kind,
+        category: playbook.category,
         status: "active",
         currentStep: 0,
         nextRunAt: runAt,
@@ -227,8 +295,14 @@ export async function enrollLead(
     });
     return enrollment;
   } catch (err) {
-    // Unique partial index: another live enrollment already exists.
-    if (err instanceof Error && /playbook_enrollments_lead_active_idx/.test(err.message)) {
+    // Unique partial index: another live enrollment (same category, or same
+    // lead+playbook) already exists. Drizzle may wrap the pg error, so check
+    // the cause too.
+    const messages = [
+      err instanceof Error ? err.message : "",
+      err instanceof Error && err.cause instanceof Error ? err.cause.message : "",
+    ].join(" ");
+    if (/playbook_enrollments_lead_(playbook_)?active_idx/.test(messages)) {
       return null;
     }
     throw err;
@@ -313,13 +387,45 @@ export async function executePlaybookStep(
         eq(leadsTable.organizationId, organizationId),
       ),
     );
-  if (!lead || !OUTREACH_ACTIVE_STATUSES.includes(lead.status as never)) {
-    await finishEnrollment(
-      enrollment.id,
-      "completed",
-      lead ? `lead moved to ${lead.status}` : "lead deleted",
-    );
-    return { status: "skipped", detail: "lead past outreach stages" };
+  if (!lead) {
+    await finishEnrollment(enrollment.id, "completed", "lead deleted");
+    return { status: "skipped", detail: "lead deleted" };
+  }
+  // Stage guards. Post-sale playbooks stay live through the won→completed
+  // stages. For pre-sale playbooks, the org's stage→behavior map decides
+  // whether an ACQUISITION sequence keeps running at this pipeline stage
+  // (defaults preserve the old outreach-stages-only behavior); other
+  // non-acquisition sequences (estimate follow-up…) run regardless of stage.
+  if (playbook.kind === "post_sale") {
+    if (
+      !(POST_SALE_ACTIVE_STATUSES as readonly string[]).includes(lead.status)
+    ) {
+      await finishEnrollment(
+        enrollment.id,
+        "completed",
+        `lead moved to ${lead.status}`,
+      );
+      return { status: "skipped", detail: "lead past playbook stages" };
+    }
+  } else if (playbook.category === "acquisition") {
+    const behaviors = await getPlaybookStageBehaviors(organizationId);
+    const behavior = behaviors[lead.status] ?? { action: "complete" };
+    const continues =
+      behavior.action === "continue" ||
+      // An "enroll into this very playbook" stage must not complete itself.
+      (behavior.action === "enroll" && behavior.enrollPlaybookId === playbook.id);
+    if (!continues) {
+      if (behavior.action === "pause") {
+        await pauseEnrollment(enrollment.id, `lead moved to ${lead.status}`);
+        return { status: "skipped", detail: "paused by stage behavior" };
+      }
+      await finishEnrollment(
+        enrollment.id,
+        behavior.action === "cancel" ? "stopped" : "completed",
+        `lead moved to ${lead.status}`,
+      );
+      return { status: "skipped", detail: "lead past outreach stages" };
+    }
   }
   const [contact] = await db
     .select()
@@ -479,7 +585,7 @@ export async function executePlaybookStep(
   let skipDetail: string | null = null;
   const settings = await getOrgSettings(organizationId);
   const businessName =
-    settings.businessProfile.businessName ?? CLIENT.businessShortName;
+    await getBusinessName(organizationId);
 
   // Learning loop: bandit-allocated message variant (pinned wins; even
   // split while exploring; Thompson sampling on reply rate afterwards).
@@ -497,6 +603,22 @@ export async function executePlaybookStep(
     totalSteps: playbook.steps.length,
   });
 
+  // Post-sale review/referral steps carry the contact's tokenized
+  // engagement link (click/submission tracked, org-scoped by token).
+  let linkSuffix = "";
+  if (step.linkKind === "review" || step.linkKind === "referral") {
+    const link = await getOrCreateEngagementLink(
+      organizationId,
+      contact.id,
+      step.linkKind,
+      lead.id,
+    );
+    linkSuffix =
+      step.linkKind === "review"
+        ? `\n\nLeave us a review: ${engagementLinkUrl(link)}`
+        : `\n\nKnow someone we can help? Pass along their name: ${engagementLinkUrl(link)}`;
+  }
+
   if (gateSkipReason) {
     skipDetail = `blocked: ${gateSkipReason}`;
   } else {
@@ -504,11 +626,11 @@ export async function executePlaybookStep(
       if (step.channel === "email") {
         sendResult = await providers.email.send(
           contact.email!,
-          variant.subject ?? step.subject ?? `${businessName} — about your roof`,
-          draft.body + unsubscribeFooter(organizationId, contact.id),
+          variant.subject ?? step.subject ?? `${businessName} — following up`,
+          draft.body + linkSuffix + unsubscribeFooter(organizationId, contact.id),
         );
       } else {
-        sendResult = await providers.sms.send(contact.phone!, draft.body);
+        sendResult = await providers.sms.send(contact.phone!, draft.body + linkSuffix);
       }
     } catch (err) {
       // Permanently bad address → suppress it and stop the sequence so
@@ -607,6 +729,25 @@ export async function executePlaybookStep(
     : { status: "skipped", detail: skipDetail ?? "unreachable" };
 }
 
+async function pauseEnrollment(
+  enrollmentId: string,
+  reason: string,
+): Promise<void> {
+  await db
+    .update(playbookEnrollmentsTable)
+    .set({ status: "paused", pauseReason: reason })
+    .where(
+      and(
+        eq(playbookEnrollmentsTable.id, enrollmentId),
+        eq(playbookEnrollmentsTable.status, "active"),
+      ),
+    );
+  await appendHistory(enrollmentId, {
+    at: new Date().toISOString(),
+    kind: "paused",
+    detail: reason,
+  });
+}
 async function finishEnrollment(
   enrollmentId: string,
   status: "completed" | "stopped",
@@ -633,6 +774,10 @@ export async function stopEnrollmentsForLead(
   leadId: string,
   reason: string,
   status: "paused" | "completed" | "stopped" = "completed",
+  /** When set, only enrollments of this kind are affected. */
+  kind?: "outreach" | "post_sale",
+  /** When set, only enrollments of this category are affected. */
+  category?: PlaybookCategory,
 ): Promise<void> {
   try {
     const live = await db
@@ -643,6 +788,8 @@ export async function stopEnrollmentsForLead(
           eq(playbookEnrollmentsTable.organizationId, organizationId),
           eq(playbookEnrollmentsTable.leadId, leadId),
           inArray(playbookEnrollmentsTable.status, ["active", "paused"]),
+          ...(kind ? [eq(playbookEnrollmentsTable.kind, kind)] : []),
+          ...(category ? [eq(playbookEnrollmentsTable.category, category)] : []),
         ),
       );
     for (const enrollment of live) {
@@ -661,6 +808,30 @@ export async function stopEnrollmentsForLead(
   }
 }
 
+/**
+ * Enroll a lead into a specific playbook by id (stage-behavior hand-off).
+ * Bypasses enrollment rules and the outreach-stage check — the admin picked
+ * the target explicitly. No-ops when the playbook is missing/inactive/empty
+ * or a live enrollment of the same category already exists.
+ */
+export async function enrollLeadInPlaybookById(
+  organizationId: string,
+  leadId: string,
+  playbookId: string,
+): Promise<PlaybookEnrollment | null> {
+  const [playbook] = await db
+    .select()
+    .from(playbooksTable)
+    .where(
+      and(
+        eq(playbooksTable.id, playbookId),
+        eq(playbooksTable.organizationId, organizationId),
+        eq(playbooksTable.isActive, true),
+      ),
+    );
+  if (!playbook || playbook.steps.length === 0) return null;
+  return enrollLead(organizationId, leadId, playbook);
+}
 /** Rep control: resume a paused enrollment (reschedules the current step). */
 export async function resumeEnrollment(
   organizationId: string,
@@ -773,4 +944,117 @@ export async function getLeadEnrollment(
     playbookName: row.playbookName,
     totalSteps: row.steps.length,
   };
+}
+
+/**
+ * Apply the org's configured stage→behavior to a lead's live ACQUISITION
+ * enrollment after a pipeline-stage change. Defaults preserve the historical
+ * behavior (outreach stages continue; everything else completes). Never
+ * throws — stage changes must never break CRM flows.
+ */
+export async function applyStageBehaviorToLead(
+  organizationId: string,
+  leadId: string,
+  status: string,
+): Promise<void> {
+  try {
+    const behaviors = await getPlaybookStageBehaviors(organizationId);
+    const behavior: StageBehavior = behaviors[status] ?? { action: "complete" };
+    switch (behavior.action) {
+      case "continue":
+        return;
+      case "pause":
+        await stopEnrollmentsForLead(
+          organizationId,
+          leadId,
+          `lead moved to ${status}`,
+          "paused",
+          undefined,
+          "acquisition",
+        );
+        return;
+      case "cancel":
+        await stopEnrollmentsForLead(
+          organizationId,
+          leadId,
+          `lead moved to ${status}`,
+          "stopped",
+          undefined,
+          "acquisition",
+        );
+        return;
+      case "enroll": {
+        const target = behavior.enrollPlaybookId;
+        // Don't hand off to itself: if the lead's live acquisition enrollment
+        // is already the target playbook, leave it running.
+        if (target) {
+          const [live] = await db
+            .select({ playbookId: playbookEnrollmentsTable.playbookId })
+            .from(playbookEnrollmentsTable)
+            .where(
+              and(
+                eq(playbookEnrollmentsTable.organizationId, organizationId),
+                eq(playbookEnrollmentsTable.leadId, leadId),
+                inArray(playbookEnrollmentsTable.status, ["active", "paused"]),
+                eq(playbookEnrollmentsTable.category, "acquisition"),
+              ),
+            );
+          if (live?.playbookId === target) return;
+        }
+        await stopEnrollmentsForLead(
+          organizationId,
+          leadId,
+          `lead moved to ${status} — handed off`,
+          "completed",
+          undefined,
+          "acquisition",
+        );
+        if (target) {
+          await enrollLeadInPlaybookById(organizationId, leadId, target);
+        }
+        return;
+      }
+      case "complete":
+      default:
+        await stopEnrollmentsForLead(
+          organizationId,
+          leadId,
+          `lead moved to ${status}`,
+          "completed",
+          undefined,
+          "acquisition",
+        );
+    }
+  } catch (err) {
+    console.error("[playbooks] applyStageBehaviorToLead failed:", err);
+  }
+}
+
+/**
+ * Rep control: pause ONE live enrollment by id (org-scoped). Other live
+ * enrollments the lead holds in different categories are unaffected.
+ */
+export async function pauseEnrollmentById(
+  organizationId: string,
+  enrollmentId: string,
+  reason: string,
+): Promise<PlaybookEnrollment | null> {
+  const [updated] = await db
+    .update(playbookEnrollmentsTable)
+    .set({ status: "paused", pauseReason: reason })
+    .where(
+      and(
+        eq(playbookEnrollmentsTable.id, enrollmentId),
+        eq(playbookEnrollmentsTable.organizationId, organizationId),
+        eq(playbookEnrollmentsTable.status, "active"),
+      ),
+    )
+    .returning();
+  if (!updated) return null;
+  await appendHistory(updated.id, {
+    at: new Date().toISOString(),
+    kind: "paused",
+    detail: reason,
+  });
+  return updated;
 }

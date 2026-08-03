@@ -3,12 +3,16 @@ import { eq } from "drizzle-orm";
 import type { NextFunction, Request, Response } from "express";
 
 import { hasPermission, type Permission } from "../lib/permissions";
-import { createFailureLimiter } from "../lib/rateLimit";
+import { createFailureLimiter, incrementShared } from "../lib/rateLimit";
 import { resolveApiKey } from "../services/api-keys";
 import { reportApiKeyBruteForceBlock } from "../services/security-alerts";
 
 const INVALID_KEY_WINDOW_MS = 15 * 60 * 1000;
 const INVALID_KEY_MAX_FAILURES = 10;
+
+/** Per-key budget for programmatic API calls (requests per minute). */
+const API_KEY_RATE_WINDOW_MS = 60 * 1000;
+const API_KEY_RATE_MAX = 240;
 
 /**
  * Per-IP throttle on *failed* API-key lookups so key guessing can't be
@@ -92,6 +96,26 @@ export function requireMember(permission: Permission): RequireMemberGuard {
       ) {
         res.status(403).json({ error: "API key lacks this permission" });
         return;
+      }
+      // Per-key request budget for the programmatic API. Shared DB counter
+      // so the limit holds across instances; fails open on DB errors.
+      try {
+        const bucket = await incrementShared(
+          `api-key-rate:${resolved.key.id}`,
+          API_KEY_RATE_WINDOW_MS,
+        );
+        if (bucket.count > API_KEY_RATE_MAX) {
+          res
+            .status(429)
+            .setHeader(
+              "Retry-After",
+              String(Math.max(1, Math.ceil((bucket.resetAt - Date.now()) / 1000))),
+            )
+            .json({ error: "API rate limit exceeded, slow down" });
+          return;
+        }
+      } catch {
+        // fail open — availability over strictness for authed callers
       }
       req.member = {
         user: resolved.creator,

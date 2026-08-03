@@ -64,6 +64,17 @@ export interface Lead {
   summary?: string | null;
   /** @nullable */
   estimatedValueCents?: number | null;
+  /** @nullable */
+  lostReason?: string | null;
+  /** @nullable */
+  wonAt?: Date | null;
+  /** @nullable */
+  wonRevenueCents?: number | null;
+  /**
+     * Honest revenue-attribution category recorded at win time (directly_attributed | assisted | self_reported | estimated | unknown).
+     * @nullable
+     */
+  wonAttribution?: string | null;
   /** True when the homeowner has sent a portal_message more recently than the last team_message reply (list endpoints only). */
   hasUnreadPortalMessage?: boolean;
   /** Total number of photos attached across all photos_attached activities (list endpoints only). */

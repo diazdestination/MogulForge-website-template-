@@ -11,4 +11,6 @@ export interface PlaybookRules {
   urgencies?: string[];
   serviceTypes?: string[];
   sources?: string[];
+  /** Post-sale milestone gating — enroll only when the lead reaches one of these statuses. */
+  milestoneStatuses?: string[];
 }

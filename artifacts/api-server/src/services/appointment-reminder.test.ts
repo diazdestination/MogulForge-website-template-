@@ -369,7 +369,7 @@ describe("appointment reminders", () => {
     const id = started.conversationId;
     const say = (content: string) =>
       handleMessage({ organizationId: org.id, conversationId: id, content });
-    await say("Roof repair");
+    await say("Request a quote");
     await say("A few shingles blew off last week.");
     await say("Emmy Prefers");
     await say("+15550000006");

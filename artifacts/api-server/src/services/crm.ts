@@ -1,3 +1,4 @@
+import { dispatchWebhookEvent } from "./webhooks";
 import {
   activitiesTable,
   analyticsEventsTable,
@@ -1207,6 +1208,16 @@ export async function updateAppointment(
     // gets a fresh reminder aligned to the new window.
     if (row.status !== "scheduled" && row.status !== "confirmed") {
       await cancelAppointmentReminders(organizationId, row.id);
+      // Outbound webhook mirror: a booked appointment being cancelled is a
+      // lifecycle event outside systems care about. Only fire on the actual
+      // transition into cancelled, not repeat saves.
+      if (row.status === "cancelled" && existing.status !== "cancelled") {
+        void dispatchWebhookEvent(organizationId, "appointment.cancelled", {
+          appointmentId: row.id,
+          leadId: row.leadId ?? null,
+          contactId: row.contactId ?? null,
+        }).catch(() => {});
+      }
     } else if (input.scheduledStart !== undefined) {
       await cancelAppointmentReminders(organizationId, row.id);
       await scheduleAppointmentReminder(organizationId, row);

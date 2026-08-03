@@ -7,6 +7,7 @@
  * insurance approval, pricing, damage conclusions, or structural safety, and
  * emits emergency safety language when danger is indicated.
  */
+import { dispatchWebhookEvent } from "./webhooks";
 import {
   DEFAULT_CONCIERGE_SETTINGS,
   type ConciergeIntent,
@@ -607,6 +608,11 @@ export async function handleMessage(params: {
       // Learning loop: a resumed chat is a reply — attribute it to the
       // outreach touches that preceded it.
       await recordLeadOutcome(params.organizationId, conversation.leadId, "replied");
+      // Outbound webhook mirror: outside systems can react to the reply.
+      void dispatchWebhookEvent(params.organizationId, "lead.replied", {
+        leadId: conversation.leadId,
+        channel: "concierge",
+      }).catch(() => {});
       await db.insert(auditEventsTable).values({
         organizationId: params.organizationId,
         actorUserId: null,

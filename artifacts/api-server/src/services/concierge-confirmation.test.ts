@@ -51,7 +51,7 @@ async function runFullFlow(opts: { email: string | "skip"; contactMethod: string
   const say = (content: string) =>
     handleMessage({ organizationId: org.id, conversationId: start.conversationId, content });
 
-  await say("Roof repair"); // intent
+  await say("Request a quote"); // intent
   await say("A few shingles blew off last week."); // details
   await say("Connie Firmation"); // name
   await say("+15550009999"); // phone

@@ -71,7 +71,7 @@ describe("abandoned chat resume", () => {
     const id = started.conversationId;
 
     // Progress far enough to create a lead (name + phone).
-    await say(id, "Roof repair");
+    await say(id, "Request a quote");
     await say(id, "A few shingles blew off last week.");
     await say(id, "Resa Umer");
     await say(id, "555-000-3333");
@@ -167,7 +167,7 @@ describe("abandoned chat resume", () => {
   it("resume straight to completion from abandoned works too", async () => {
     const started = await startConversation({ organizationId: org.id });
     const id = started.conversationId;
-    await say(id, "Roof repair");
+    await say(id, "Request a quote");
     await say(id, "Small leak spot on the porch roof.");
     await say(id, "Solo Finisher");
     await say(id, "555-000-4444");

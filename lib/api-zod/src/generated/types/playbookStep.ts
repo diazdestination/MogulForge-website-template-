@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { PlaybookStepChannel } from './playbookStepChannel';
+import type { PlaybookStepLinkKind } from './playbookStepLinkKind';
 import type { PlaybookStepVariant } from './playbookStepVariant';
 
 export interface PlaybookStep {
@@ -15,4 +16,6 @@ export interface PlaybookStep {
   prompt: string;
   variants?: PlaybookStepVariant[];
   pinnedVariant?: string;
+  /** Appends the contact's tokenized review/referral engagement link to the message. */
+  linkKind?: PlaybookStepLinkKind;
 }

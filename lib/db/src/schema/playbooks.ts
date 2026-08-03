@@ -34,6 +34,11 @@ export interface PlaybookStep {
    */
   variants?: PlaybookStepVariant[];
   /**
+   * Post-sale steps: append the contact's tokenized engagement link to the
+   * message ("review" click-through or "referral" submission link).
+   */
+  linkKind?: "review" | "referral";
+  /**
    * Admin override: pin a variant key ("default" or a variants[].key) to
    * disable automatic allocation for this step.
    */
@@ -56,8 +61,27 @@ export interface PlaybookEnrollmentRules {
   urgencies?: string[];
   serviceTypes?: string[];
   sources?: string[];
+  /**
+   * Post-sale playbooks only: lead statuses that trigger enrollment (e.g.
+   * ["won"] for a review request, ["completed"] for maintenance check-ins).
+   * The milestone must actually be reached — never enrolled before.
+   */
+  milestoneStatuses?: string[];
 }
 
+/**
+ * Playbook categories. Concurrency between live enrollments is keyed by
+ * category: a lead can hold at most one live enrollment PER category, so
+ * e.g. an acquisition outreach sequence and a review-request sequence can
+ * run at the same time, but two acquisition sequences can not.
+ */
+export const PLAYBOOK_CATEGORIES = [
+  "acquisition",
+  "estimate_follow_up",
+  "reactivation",
+  "review_request",
+  "referral",
+] as const;
 export const playbooksTable = pgTable(
   "playbooks",
   {
@@ -66,6 +90,11 @@ export const playbooksTable = pgTable(
       .notNull()
       .references(() => organizationsTable.id),
     name: text("name").notNull(),
+    /** What kind of sequence this is; drives per-lead concurrency. */
+    category: text("category")
+      .$type<PlaybookCategory>()
+      .notNull()
+      .default("acquisition"),
     /**
      * Immutable identifier for system-seeded playbooks (e.g.
      * "default.new_lead_outreach"). Null for admin-created playbooks.
@@ -73,6 +102,13 @@ export const playbooksTable = pgTable(
      * deactivated seeded playbook is never re-seeded.
      */
     seedKey: text("seed_key"),
+    /**
+     * "outreach" (default): pre-sale sequences auto-enrolled on lead
+     * creation. "post_sale": milestone-gated sequences (review/referral/
+     * maintenance) enrolled only when the lead reaches a configured
+     * milestone status.
+     */
+    kind: text("kind").notNull().default("outreach"),
     isActive: boolean("is_active").notNull().default(true),
     enrollmentRules: jsonb("enrollment_rules")
       .$type<PlaybookEnrollmentRules>()
@@ -125,6 +161,13 @@ export const playbookEnrollmentsTable = pgTable(
     leadId: uuid("lead_id")
       .notNull()
       .references(() => leadsTable.id),
+    /** Denormalized copy of the playbook's kind (drives uniqueness rules). */
+    kind: text("kind").notNull().default("outreach"),
+    /** Denormalized playbook category at enrollment time (concurrency key). */
+    category: text("category")
+      .$type<PlaybookCategory>()
+      .notNull()
+      .default("acquisition"),
     /** active | paused | completed | stopped */
     status: text("status").notNull().default("active"),
     /** Index of the NEXT step to send (0-based). */
@@ -150,9 +193,17 @@ export const playbookEnrollmentsTable = pgTable(
       table.organizationId,
       table.leadId,
     ),
-    // At most one non-terminal enrollment per lead.
+    // At most one non-terminal OUTREACH-kind enrollment per lead PER
+    // category, so differently-categorized sequences may run concurrently.
     uniqueIndex("playbook_enrollments_lead_active_idx")
-      .on(table.leadId)
+      .on(table.leadId, table.category)
+      .where(
+        sql`${table.status} in ('active', 'paused') and ${table.kind} = 'outreach'`,
+      ),
+    // Post-sale playbooks may run alongside each other (review + referral +
+    // maintenance), but never twice for the same lead + playbook.
+    uniqueIndex("playbook_enrollments_lead_playbook_active_idx")
+      .on(table.leadId, table.playbookId)
       .where(sql`${table.status} in ('active', 'paused')`),
   ],
 );
@@ -165,3 +216,5 @@ export const insertPlaybookSchema = createInsertSchema(playbooksTable).omit({
 export type InsertPlaybook = z.infer<typeof insertPlaybookSchema>;
 export type Playbook = typeof playbooksTable.$inferSelect;
 export type PlaybookEnrollment = typeof playbookEnrollmentsTable.$inferSelect;
+
+export type PlaybookCategory = (typeof PLAYBOOK_CATEGORIES)[number];

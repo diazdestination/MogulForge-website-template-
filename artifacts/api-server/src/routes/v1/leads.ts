@@ -17,6 +17,7 @@ import {
 import { validatePhotoObjects } from "../../lib/photoValidation";
 import { Router, type IRouter, type Request, type Response } from "express";
 
+import { beginIdempotent, releaseIdempotent, storeIdempotent } from "../../lib/idempotency";
 import { requireMember } from "../../middlewares/requireMember";
 import { getLeadBehaviorSummary } from "../../services/attribution";
 import { recordAudit } from "../../services/audit";
@@ -77,8 +78,14 @@ router.post(
       res.status(400).json({ error: "Invalid lead" });
       return;
     }
+    // Programmatic API idempotency: a retried request replays the stored
+    // response instead of creating a duplicate lead.
+    if (!(await beginIdempotent(req, res, "leads.create"))) return;
     const lead = await crm.createLead(req.member!.organizationId, parsed.data);
     if (!lead) {
+      // The work failed — release the reservation so a corrected retry with
+      // the same key can run instead of getting stuck behind a placeholder.
+      await releaseIdempotent(req, "leads.create");
       res.status(400).json({ error: "Contact not found in your organization" });
       return;
     }
@@ -99,6 +106,7 @@ router.post(
         "lead.source": lead.source,
       },
     });
+    await storeIdempotent(req, "leads.create", 201, lead);
     res.status(201).json(lead);
   },
 );
@@ -318,6 +326,9 @@ router.patch(
       res.status(400).json({ error: "Invalid lead update" });
       return;
     }
+    // Snapshot the prior status so downstream consumers (webhook mirror) can
+    // distinguish a real transition from a no-op update to a terminal lead.
+    const before = await crm.getLead(req.member!.organizationId, String(req.params.id));
     const lead = await crm.updateLead(
       req.member!.organizationId,
       String(req.params.id),
@@ -348,6 +359,7 @@ router.patch(
           "lead.status": lead.status,
           "lead.urgency": lead.urgency,
           "lead.assignedUserId": lead.assignedUserId,
+          "lead.statusChanged": Boolean(before && before.status !== lead.status),
         },
       },
     );
@@ -444,6 +456,7 @@ router.post(
       res.status(404).json({ error: "Lead not found" });
       return;
     }
+    if (!(await beginIdempotent(req, res, "leads.activity"))) return;
     const activity = await crm.createActivity(req.member!.organizationId, {
       leadId: lead.id,
       contactId: lead.contactId,
@@ -462,6 +475,7 @@ router.post(
         activityId: activity.id,
       });
     }
+    await storeIdempotent(req, "leads.activity", 201, activity);
     res.status(201).json(activity);
   },
 );

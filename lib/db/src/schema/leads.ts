@@ -40,6 +40,21 @@ export const leadsTable = pgTable(
       .default([]),
     summary: text("summary"),
     estimatedValueCents: integer("estimated_value_cents"),
+    /** Why the lead was lost (free text chosen by the rep; reported in ROI). */
+    lostReason: text("lost_reason"),
+    /** When the lead was first marked won (set once by the won hook). */
+    wonAt: timestamp("won_at", { withTimezone: true }),
+    /**
+     * Revenue captured when the lead was won: the accepted estimate total
+     * when one exists, otherwise the rep's estimated value. Never invented.
+     */
+    wonRevenueCents: integer("won_revenue_cents"),
+    /**
+     * Honest revenue-attribution category assigned at win time:
+     * directly_attributed | assisted | self_reported | estimated | unknown.
+     * Revenue is never claimed without one of these labels.
+     */
+    wonAttribution: text("won_attribution"),
     firstTouch: jsonb("first_touch").$type<Record<string, unknown>>(),
     lastTouch: jsonb("last_touch").$type<Record<string, unknown>>(),
     /** Most recent marketing source (source keeps the ORIGINAL source). */

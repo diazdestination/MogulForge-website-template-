@@ -691,16 +691,35 @@ async function drainCampaign(campaign: ReactivationCampaign): Promise<void> {
   const rows = claimed.rows as { id: string; lead_id: string }[];
 
   for (const row of rows) {
-    const outcome = await enrollCampaignLead(campaign, playbook, row.lead_id);
-    if (outcome.status === "skipped") {
+    try {
+      const outcome = await enrollCampaignLead(campaign, playbook, row.lead_id);
+      if (outcome.status === "skipped") {
+        await db
+          .update(reactivationCampaignLeadsTable)
+          .set({ status: "skipped", detail: outcome.detail, enrollmentId: null })
+          .where(eq(reactivationCampaignLeadsTable.id, row.id));
+      } else {
+        await db
+          .update(reactivationCampaignLeadsTable)
+          .set({ enrollmentId: outcome.enrollmentId })
+          .where(eq(reactivationCampaignLeadsTable.id, row.id));
+      }
+    } catch (err) {
+      // Per-lead isolation: one failed enrollment must not abort the batch
+      // or strand its claimed row. Release the row back to pending so a
+      // later tick retries it (the claim happens before send scheduling, so
+      // a retry can never double-send).
+      console.error(
+        `[reactivation] drain failed for campaign ${campaign.id}:`,
+        err,
+      );
       await db
         .update(reactivationCampaignLeadsTable)
-        .set({ status: "skipped", detail: outcome.detail, enrollmentId: null })
-        .where(eq(reactivationCampaignLeadsTable.id, row.id));
-    } else {
-      await db
-        .update(reactivationCampaignLeadsTable)
-        .set({ enrollmentId: outcome.enrollmentId })
+        .set({
+          status: "pending",
+          enrollmentId: null,
+          detail: err instanceof Error ? err.message : "enrollment failed",
+        })
         .where(eq(reactivationCampaignLeadsTable.id, row.id));
     }
   }

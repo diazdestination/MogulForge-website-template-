@@ -87,7 +87,7 @@ export const mockAiProvider: AiProvider = {
 export const openAiProvider: AiProvider = {
   async summarizeLead(input) {
     const summary = await openAiComplete(
-      "Write a one-sentence internal CRM summary of this roofing lead. Do not speculate about damage, pricing, or insurance outcomes.",
+      "Write a one-sentence internal CRM summary of this inbound sales lead. Do not speculate about damage, pricing, or insurance outcomes.",
       `Intent: ${input.intent}\nUrgency: ${input.urgency}\nHomeowner notes: ${input.description ?? "none"}`,
     );
     return { summary, provider: "openai" };
@@ -95,8 +95,8 @@ export const openAiProvider: AiProvider = {
   async generateSalesSummary(input) {
     const summary = await openAiComplete(
       [
-        "You write concise internal sales summaries for a roofing company CRM from AI concierge chat intakes.",
-        "Rules: never guarantee insurance approval or claim payment, never state pricing, never conclude the roof is damaged or structurally safe/unsafe — only report what the homeowner said.",
+        "You write concise internal sales summaries for a company CRM from AI concierge chat intakes.",
+        "Rules: never guarantee insurance approval or claim payment, never state pricing, never conclude the property is damaged or structurally safe/unsafe — only report what the customer said.",
         "Always end with the recommended next step for the sales rep.",
         "Output 4-7 short lines.",
       ].join(" "),
@@ -306,7 +306,7 @@ export const resendEmailProvider: EmailProvider = {
     const apiKey = process.env.RESEND_API_KEY;
     if (!apiKey) throw new Error("RESEND_API_KEY is not set");
     const from =
-      process.env.RESEND_FROM_EMAIL ?? "Painless Roofing <onboarding@resend.dev>";
+      process.env.RESEND_FROM_EMAIL ?? "Leads <onboarding@resend.dev>";
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
@@ -415,14 +415,14 @@ export async function draftOutreachMessage(input: {
     try {
       const body = await openAiComplete(
         [
-          `You write ${input.channel === "sms" ? "SMS texts (max 2 short sentences, no links, no emojis)" : "short plain-text emails (max 6 short lines, no HTML)"} for ${input.businessName}, a roofing company, reaching out to a homeowner who requested help.`,
-          "Rules: never state pricing, never guarantee insurance approval, never conclude the roof is damaged — only offer help and a clear next step.",
-          "Address the homeowner by first name. Sign off with the business name.",
+          `You write ${input.channel === "sms" ? "SMS texts (max 2 short sentences, no links, no emojis)" : "short plain-text emails (max 6 short lines, no HTML)"} for ${input.businessName}, reaching out to a customer who requested help.`,
+          "Rules: never state pricing, never guarantee insurance approval, never make damage or safety determinations — only offer help and a clear next step.",
+          "Address the customer by first name. Sign off with the business name.",
           "Output ONLY the message body.",
         ].join(" "),
         [
-          `Homeowner first name: ${input.contactFirstName}`,
-          `Their request: ${input.leadSummary ?? input.serviceType ?? "roofing help"}`,
+          `Customer first name: ${input.contactFirstName}`,
+          `Their request: ${input.leadSummary ?? input.serviceType ?? "your request"}`,
           `Urgency: ${input.urgency}`,
           `Touch ${input.stepNumber} of ${input.totalSteps}. Direction for this message: ${input.prompt}`,
         ].join("\n"),
@@ -438,8 +438,8 @@ export async function draftOutreachMessage(input: {
   const greeting = `Hi ${input.contactFirstName},`;
   const core =
     input.channel === "sms"
-      ? `${input.businessName} here — we're ready to help with your ${input.serviceType ?? "roof"}. Reply to this text and we'll take care of the rest.`
-      : `${greeting}\n\nThanks for reaching out about your ${input.serviceType ?? "roof"} — our team is ready to help and your free inspection is easy to schedule. Just reply to this email and we'll set it up.\n\n— ${input.businessName}`;
+      ? `${input.businessName} here — we're ready to help with your ${input.serviceType ?? "request"}. Reply to this text and we'll take care of the rest.`
+      : `${greeting}\n\nThanks for reaching out about your ${input.serviceType ?? "request"} — our team is ready to help and it's easy to schedule time with us. Just reply to this email and we'll set it up.\n\n— ${input.businessName}`;
   return { body: core, provider: "template-fallback" };
 }
 

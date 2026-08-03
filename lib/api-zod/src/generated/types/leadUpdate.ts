@@ -25,4 +25,6 @@ export interface LeadUpdate {
   summary?: string | null;
   /** @nullable */
   estimatedValueCents?: number | null;
+  /** @nullable */
+  lostReason?: string | null;
 }

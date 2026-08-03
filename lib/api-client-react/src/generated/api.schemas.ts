@@ -510,6 +510,17 @@ export interface Lead {
   summary?: string | null;
   /** @nullable */
   estimatedValueCents?: number | null;
+  /** @nullable */
+  lostReason?: string | null;
+  /** @nullable */
+  wonAt?: string | null;
+  /** @nullable */
+  wonRevenueCents?: number | null;
+  /**
+     * Honest revenue-attribution category recorded at win time (directly_attributed | assisted | self_reported | estimated | unknown).
+     * @nullable
+     */
+  wonAttribution?: string | null;
   /** True when the homeowner has sent a portal_message more recently than the last team_message reply (list endpoints only). */
   hasUnreadPortalMessage?: boolean;
   /** Total number of photos attached across all photos_attached activities (list endpoints only). */
@@ -548,6 +559,100 @@ export interface LeadUpdate {
   summary?: string | null;
   /** @nullable */
   estimatedValueCents?: number | null;
+  /** @nullable */
+  lostReason?: string | null;
+}
+
+export interface ReferralSubmissionInput {
+  name: string;
+  /** @nullable */
+  email?: string | null;
+  /** @nullable */
+  phone?: string | null;
+  /** @nullable */
+  notes?: string | null;
+}
+
+export interface RoiBreakdownRow {
+  key: string;
+  count: number;
+}
+
+export type RoiReportLeads = {
+  total: number;
+  qualified: number;
+  bySource: RoiBreakdownRow[];
+  byCampaign: RoiBreakdownRow[];
+  byTool: RoiBreakdownRow[];
+  byLandingPage: RoiBreakdownRow[];
+  byServiceType: RoiBreakdownRow[];
+};
+
+export type RoiReportAppointments = {
+  total: number;
+  leadsWithAppointment: number;
+  /** @nullable */
+  appointmentRatePct?: number | null;
+};
+
+export type RoiReportResponsiveness = {
+  leadsContacted: number;
+  leadsReplied: number;
+  /** @nullable */
+  responseRatePct?: number | null;
+  /** @nullable */
+  medianMinutesToFirstTouch?: number | null;
+};
+
+export type RoiReportPlaybooksItem = {
+  playbookId: string;
+  name: string;
+  kind: string;
+  sent: number;
+  replied: number;
+  booked: number;
+  won: number;
+};
+
+export type RoiReportReviewsAndReferrals = {
+  reviewRequestsSent: number;
+  reviewLinkClicks: number;
+  referralRequestsSent: number;
+  referralSubmissions: number;
+  referralLeads: number;
+};
+
+export type RoiReportReactivation = {
+  campaignsLaunched: number;
+  leadsEnrolled: number;
+  leadsReplied: number;
+};
+
+export type RoiReportOutcomesRevenueByAttributionItem = {
+  category: string;
+  count: number;
+  revenueCents: number;
+};
+
+export type RoiReportOutcomes = {
+  won: number;
+  revenueWonCents: number;
+  revenueByAttribution: RoiReportOutcomesRevenueByAttributionItem[];
+  pipelineValueCents: number;
+  lost: number;
+  lostReasons: RoiBreakdownRow[];
+};
+
+export interface RoiReport {
+  windowDays: number;
+  generatedAt: string;
+  leads: RoiReportLeads;
+  appointments: RoiReportAppointments;
+  responsiveness: RoiReportResponsiveness;
+  playbooks: RoiReportPlaybooksItem[];
+  reviewsAndReferrals: RoiReportReviewsAndReferrals;
+  reactivation: RoiReportReactivation;
+  outcomes: RoiReportOutcomes;
 }
 
 export type EstimateStatus = typeof EstimateStatus[keyof typeof EstimateStatus];
@@ -1386,6 +1491,31 @@ export interface SendingHoursSettings {
   maxTouchesPerDay: number;
 }
 
+export type StageBehaviorAction = typeof StageBehaviorAction[keyof typeof StageBehaviorAction];
+
+
+export const StageBehaviorAction = {
+  continue: 'continue',
+  pause: 'pause',
+  complete: 'complete',
+  cancel: 'cancel',
+  enroll: 'enroll',
+} as const;
+
+export interface StageBehavior {
+  action: StageBehaviorAction;
+  /**
+     * Target playbook to hand the lead to (only for action "enroll").
+     * @nullable
+     */
+  enrollPlaybookId?: string | null;
+}
+
+/**
+ * Lead pipeline stage → what happens to the lead's live acquisition playbook enrollment when it enters that stage. Missing stages use the built-in defaults (outreach stages continue; everything else completes).
+ */
+export interface PlaybookStageBehaviors {[key: string]: StageBehavior}
+
 export interface OrgSettings {
   id: string;
   organizationId: string;
@@ -1414,6 +1544,7 @@ export interface OrgSettings {
   widget?: WidgetSettings | null;
   concierge?: ConciergeSettings | null;
   sendingHours?: SendingHoursSettings | null;
+  playbookStageBehaviors?: PlaybookStageBehaviors | null;
   updatedAt?: string;
 }
 
@@ -1434,6 +1565,7 @@ export interface OrgSettingsInput {
   widget?: WidgetSettings;
   concierge?: ConciergeSettings;
   sendingHours?: SendingHoursSettings;
+  playbookStageBehaviors?: PlaybookStageBehaviors;
 }
 
 export type KnowledgeEntryCategory = typeof KnowledgeEntryCategory[keyof typeof KnowledgeEntryCategory];
@@ -2030,6 +2162,17 @@ export const PlaybookStepChannel = {
   sms: 'sms',
 } as const;
 
+/**
+ * Appends the contact's tokenized review/referral engagement link to the message.
+ */
+export type PlaybookStepLinkKind = typeof PlaybookStepLinkKind[keyof typeof PlaybookStepLinkKind];
+
+
+export const PlaybookStepLinkKind = {
+  review: 'review',
+  referral: 'referral',
+} as const;
+
 export interface PlaybookStepVariant {
   key: string;
   prompt: string;
@@ -2043,6 +2186,8 @@ export interface PlaybookStep {
   prompt: string;
   variants?: PlaybookStepVariant[];
   pinnedVariant?: string;
+  /** Appends the contact's tokenized review/referral engagement link to the message. */
+  linkKind?: PlaybookStepLinkKind;
 }
 
 export interface InsightsFunnelRow {
@@ -2102,12 +2247,38 @@ export interface PlaybookRules {
   urgencies?: string[];
   serviceTypes?: string[];
   sources?: string[];
+  /** Post-sale milestone gating — enroll only when the lead reaches one of these statuses. */
+  milestoneStatuses?: string[];
 }
+
+export type PlaybookKind = typeof PlaybookKind[keyof typeof PlaybookKind];
+
+
+export const PlaybookKind = {
+  outreach: 'outreach',
+  post_sale: 'post_sale',
+} as const;
+
+/**
+ * What kind of sequence this is; a lead can hold at most one live enrollment per category, so differently-categorized playbooks may run concurrently.
+ */
+export type PlaybookCategory = typeof PlaybookCategory[keyof typeof PlaybookCategory];
+
+
+export const PlaybookCategory = {
+  acquisition: 'acquisition',
+  estimate_follow_up: 'estimate_follow_up',
+  reactivation: 'reactivation',
+  review_request: 'review_request',
+  referral: 'referral',
+} as const;
 
 export interface Playbook {
   id: string;
   name: string;
   seedKey?: string | null;
+  category?: PlaybookCategory;
+  kind?: PlaybookKind;
   isActive: boolean;
   enrollmentRules: PlaybookRules;
   steps: PlaybookStep[];
@@ -2117,6 +2288,7 @@ export interface Playbook {
 export interface PlaybookInput {
   /** @minLength 1 */
   name: string;
+  category?: PlaybookCategory;
   isActive?: boolean;
   enrollmentRules?: PlaybookRules;
   steps: PlaybookStep[];
@@ -2125,6 +2297,7 @@ export interface PlaybookInput {
 export interface PlaybookUpdate {
   /** @minLength 1 */
   name?: string;
+  category?: PlaybookCategory;
   isActive?: boolean;
   enrollmentRules?: PlaybookRules;
   steps?: PlaybookStep[];
@@ -2228,6 +2401,73 @@ export interface ReactivationSegmentPreview {
   segment: ReactivationSegment;
   count: number;
   sample: ReactivationSegmentPreviewSampleItem[];
+}
+
+/**
+ * External payload field name -> MogulForge lead field name
+ */
+export interface CaptureFieldMapping {[key: string]: string}
+
+export interface CaptureEndpointInput {
+  name: string;
+  mapping: CaptureFieldMapping;
+  defaultSource?: string;
+}
+
+export interface CaptureEndpointUpdate {
+  name?: string;
+  mapping?: CaptureFieldMapping;
+  defaultSource?: string;
+  isActive?: boolean;
+}
+
+export interface CaptureEndpoint {
+  id: string;
+  name: string;
+  token: string;
+  mapping: CaptureFieldMapping;
+  defaultSource: string;
+  isActive: boolean;
+  lastReceivedAt?: string | null;
+  receivedCount: number;
+  createdAt: string;
+  /** Full inbound POST URL for this endpoint */
+  url?: string;
+  /** Paste-in script tag for the site form listener */
+  embedSnippet?: string;
+}
+
+export type CaptureMappingPreviewRequestPayload = { [key: string]: unknown };
+
+export interface CaptureMappingPreviewRequest {
+  mapping: CaptureFieldMapping;
+  payload: CaptureMappingPreviewRequestPayload;
+}
+
+export interface CaptureMappingPreview {
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  addressLine1?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  message?: string | null;
+  source?: string | null;
+  campaign?: string | null;
+  externalId?: string | null;
+  unmapped: string[];
+}
+
+export interface CaptureDelivery {
+  id: string;
+  endpointId: string;
+  idempotencyKey?: string | null;
+  leadId?: string | null;
+  outcome: string;
+  detail?: string | null;
+  createdAt: string;
 }
 
 export interface ReactivationCampaignInput {
@@ -2562,6 +2802,82 @@ export interface AssistantChatInput {
   messages: AssistantChatTurn[];
 }
 
+export interface SessionOrganization {
+  id: string;
+  name: string;
+  slug: string;
+  timezone: string;
+}
+
+export interface SessionProfile {
+  id: string;
+  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  role: string;
+  isPlatformAdmin: boolean;
+  organization?: SessionOrganization | null;
+}
+
+export interface CreateOrgInput {
+  name: string;
+  slug?: string;
+  timezone?: string;
+}
+
+export interface UpdatePlatformOrgInput {
+  name?: string;
+  timezone?: string;
+}
+
+export interface OrgEnvelope {
+  organization: SessionOrganization;
+  joined?: boolean;
+}
+
+export interface PlatformOrg {
+  id: string;
+  name: string;
+  slug: string;
+  timezone: string;
+  createdAt: string;
+  memberCount: number;
+}
+
+export interface PlatformOrgList {
+  organizations: PlatformOrg[];
+}
+
+export interface OnboardingState {
+  completedSteps: string[];
+  currentStep?: string;
+  completedAt?: string | null;
+  dismissedAt?: string | null;
+}
+
+export interface OnboardingResponse {
+  steps: string[];
+  state: OnboardingState;
+}
+
+export interface OnboardingPatchInput {
+  completeSteps?: string[];
+  currentStep?: string;
+  launched?: boolean;
+  dismissed?: boolean;
+}
+
+export interface TestLeadResponse {
+  leadId: string;
+  contactId: string;
+  score: number;
+  enrolled: boolean;
+}
+
+export interface TestLeadCleanupResponse {
+  removed: number;
+}
+
 /**
  * Opaque session token — `Bearer <sid>`.
  */
@@ -2688,6 +3004,23 @@ action?: string;
 since?: string;
 };
 
+export type GetRoiReportParams = {
+days?: number;
+};
+
+export type ExportRoiReportParams = {
+days?: number;
+};
+
+export type GetReferralLinkInfo200 = {
+  businessName: string;
+};
+
+export type SubmitReferral201 = {
+  ok: boolean;
+  leadId: string;
+};
+
 export type GetMarketingSummaryParams = {
 /**
  * @minimum 1
@@ -2705,6 +3038,10 @@ limit?: number;
 };
 
 export type ListWebhookDeliveriesParams = {
+endpointId?: string;
+};
+
+export type ListCaptureDeliveriesParams = {
 endpointId?: string;
 };
 

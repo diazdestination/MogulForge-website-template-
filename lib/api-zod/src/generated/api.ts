@@ -852,6 +852,10 @@ export const ListLeadsResponseItem = zod.object({
   "scoreReasons": zod.array(zod.string()),
   "summary": zod.string().nullish(),
   "estimatedValueCents": zod.int().nullish(),
+  "lostReason": zod.string().nullish(),
+  "wonAt": zod.coerce.date().nullish(),
+  "wonRevenueCents": zod.int().nullish(),
+  "wonAttribution": zod.string().nullish().describe('Honest revenue-attribution category recorded at win time (directly_attributed | assisted | self_reported | estimated | unknown).'),
   "hasUnreadPortalMessage": zod.boolean().optional().describe('True when the homeowner has sent a portal_message more recently than the last team_message reply (list endpoints only).'),
   "photoCount": zod.int().optional().describe('Total number of photos attached across all photos_attached activities (list endpoints only).'),
   "createdAt": zod.coerce.date(),
@@ -896,6 +900,10 @@ export const CreateLeadResponse = zod.object({
   "scoreReasons": zod.array(zod.string()),
   "summary": zod.string().nullish(),
   "estimatedValueCents": zod.int().nullish(),
+  "lostReason": zod.string().nullish(),
+  "wonAt": zod.coerce.date().nullish(),
+  "wonRevenueCents": zod.int().nullish(),
+  "wonAttribution": zod.string().nullish().describe('Honest revenue-attribution category recorded at win time (directly_attributed | assisted | self_reported | estimated | unknown).'),
   "hasUnreadPortalMessage": zod.boolean().optional().describe('True when the homeowner has sent a portal_message more recently than the last team_message reply (list endpoints only).'),
   "photoCount": zod.int().optional().describe('Total number of photos attached across all photos_attached activities (list endpoints only).'),
   "createdAt": zod.coerce.date(),
@@ -970,6 +978,10 @@ export const MergeLeadResponse = zod.object({
   "scoreReasons": zod.array(zod.string()),
   "summary": zod.string().nullish(),
   "estimatedValueCents": zod.int().nullish(),
+  "lostReason": zod.string().nullish(),
+  "wonAt": zod.coerce.date().nullish(),
+  "wonRevenueCents": zod.int().nullish(),
+  "wonAttribution": zod.string().nullish().describe('Honest revenue-attribution category recorded at win time (directly_attributed | assisted | self_reported | estimated | unknown).'),
   "hasUnreadPortalMessage": zod.boolean().optional().describe('True when the homeowner has sent a portal_message more recently than the last team_message reply (list endpoints only).'),
   "photoCount": zod.int().optional().describe('Total number of photos attached across all photos_attached activities (list endpoints only).'),
   "createdAt": zod.coerce.date(),
@@ -1046,6 +1058,10 @@ export const GetLeadResponse = zod.object({
   "scoreReasons": zod.array(zod.string()),
   "summary": zod.string().nullish(),
   "estimatedValueCents": zod.int().nullish(),
+  "lostReason": zod.string().nullish(),
+  "wonAt": zod.coerce.date().nullish(),
+  "wonRevenueCents": zod.int().nullish(),
+  "wonAttribution": zod.string().nullish().describe('Honest revenue-attribution category recorded at win time (directly_attributed | assisted | self_reported | estimated | unknown).'),
   "hasUnreadPortalMessage": zod.boolean().optional().describe('True when the homeowner has sent a portal_message more recently than the last team_message reply (list endpoints only).'),
   "photoCount": zod.int().optional().describe('Total number of photos attached across all photos_attached activities (list endpoints only).'),
   "createdAt": zod.coerce.date(),
@@ -1066,7 +1082,8 @@ export const UpdateLeadBody = zod.object({
   "source": zod.string().nullish(),
   "sourceDetail": zod.string().nullish(),
   "summary": zod.string().nullish(),
-  "estimatedValueCents": zod.int().nullish()
+  "estimatedValueCents": zod.int().nullish(),
+  "lostReason": zod.string().nullish()
 })
 
 export const UpdateLeadResponse = zod.object({
@@ -1092,6 +1109,10 @@ export const UpdateLeadResponse = zod.object({
   "scoreReasons": zod.array(zod.string()),
   "summary": zod.string().nullish(),
   "estimatedValueCents": zod.int().nullish(),
+  "lostReason": zod.string().nullish(),
+  "wonAt": zod.coerce.date().nullish(),
+  "wonRevenueCents": zod.int().nullish(),
+  "wonAttribution": zod.string().nullish().describe('Honest revenue-attribution category recorded at win time (directly_attributed | assisted | self_reported | estimated | unknown).'),
   "hasUnreadPortalMessage": zod.boolean().optional().describe('True when the homeowner has sent a portal_message more recently than the last team_message reply (list endpoints only).'),
   "photoCount": zod.int().optional().describe('Total number of photos attached across all photos_attached activities (list endpoints only).'),
   "createdAt": zod.coerce.date(),
@@ -2104,6 +2125,142 @@ export const ListLeadConversationsResponse = zod.array(ListLeadConversationsResp
 
 
 /**
+ * @summary Organization ROI report with honest revenue attribution
+ */
+export const GetRoiReportQueryParams = zod.object({
+  "days": zod.coerce.number().int().optional()
+})
+
+export const GetRoiReportResponse = zod.object({
+  "windowDays": zod.int(),
+  "generatedAt": zod.coerce.date(),
+  "leads": zod.object({
+  "total": zod.int(),
+  "qualified": zod.int(),
+  "bySource": zod.array(zod.object({
+  "key": zod.string(),
+  "count": zod.int()
+})),
+  "byCampaign": zod.array(zod.object({
+  "key": zod.string(),
+  "count": zod.int()
+})),
+  "byTool": zod.array(zod.object({
+  "key": zod.string(),
+  "count": zod.int()
+})),
+  "byLandingPage": zod.array(zod.object({
+  "key": zod.string(),
+  "count": zod.int()
+})),
+  "byServiceType": zod.array(zod.object({
+  "key": zod.string(),
+  "count": zod.int()
+}))
+}),
+  "appointments": zod.object({
+  "total": zod.int(),
+  "leadsWithAppointment": zod.int(),
+  "appointmentRatePct": zod.int().nullish()
+}),
+  "responsiveness": zod.object({
+  "leadsContacted": zod.int(),
+  "leadsReplied": zod.int(),
+  "responseRatePct": zod.int().nullish(),
+  "medianMinutesToFirstTouch": zod.int().nullish()
+}),
+  "playbooks": zod.array(zod.object({
+  "playbookId": zod.string(),
+  "name": zod.string(),
+  "kind": zod.string(),
+  "sent": zod.int(),
+  "replied": zod.int(),
+  "booked": zod.int(),
+  "won": zod.int()
+})),
+  "reviewsAndReferrals": zod.object({
+  "reviewRequestsSent": zod.int(),
+  "reviewLinkClicks": zod.int(),
+  "referralRequestsSent": zod.int(),
+  "referralSubmissions": zod.int(),
+  "referralLeads": zod.int()
+}),
+  "reactivation": zod.object({
+  "campaignsLaunched": zod.int(),
+  "leadsEnrolled": zod.int(),
+  "leadsReplied": zod.int()
+}),
+  "outcomes": zod.object({
+  "won": zod.int(),
+  "revenueWonCents": zod.int(),
+  "revenueByAttribution": zod.array(zod.object({
+  "category": zod.string(),
+  "count": zod.int(),
+  "revenueCents": zod.int()
+})),
+  "pipelineValueCents": zod.int(),
+  "lost": zod.int(),
+  "lostReasons": zod.array(zod.object({
+  "key": zod.string(),
+  "count": zod.int()
+}))
+})
+})
+
+
+/**
+ * @summary ROI report flattened to CSV
+ */
+export const ExportRoiReportQueryParams = zod.object({
+  "days": zod.coerce.number().int().optional()
+})
+
+export const ExportRoiReportResponse = zod.unknown()
+
+
+/**
+ * @summary Business info for a tokenized referral form
+ */
+export const GetReferralLinkInfoParams = zod.object({
+  "token": zod.coerce.string()
+})
+
+export const GetReferralLinkInfoResponse = zod.object({
+  "businessName": zod.string()
+})
+
+
+/**
+ * @summary Submit a referral (creates an attributed lead)
+ */
+export const SubmitReferralParams = zod.object({
+  "token": zod.coerce.string()
+})
+
+export const SubmitReferralBody = zod.object({
+  "name": zod.string(),
+  "email": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "notes": zod.string().nullish()
+})
+
+export const SubmitReferralResponse = zod.object({
+  "ok": zod.boolean(),
+  "leadId": zod.string()
+})
+
+
+/**
+ * @summary Tracked review-link click-through (302 redirect)
+ */
+export const FollowEngagementLinkParams = zod.object({
+  "token": zod.coerce.string()
+})
+
+export const FollowEngagementLinkResponse = zod.void()
+
+
+/**
  * @summary Capture a first-party analytics event
  */
 
@@ -2376,6 +2533,10 @@ export const GetSettingsResponse = zod.object({
   "days": zod.array(zod.string()).describe('Days sends are allowed (Mon..Sun).'),
   "maxTouchesPerDay": zod.int().describe('Max automated touches per contact per rolling 24h (0 = unlimited).')
 }).describe('Quiet hours and frequency caps for automated outreach (playbooks + automation email\/SMS). Quiet hours defer sends into the next allowed window; they never drop them.'),zod.null()]).optional(),
+  "playbookStageBehaviors": zod.union([zod.record(zod.string(), zod.object({
+  "action": zod.enum(['continue', 'pause', 'complete', 'cancel', 'enroll']),
+  "enrollPlaybookId": zod.string().nullish().describe('Target playbook to hand the lead to (only for action \"enroll\").')
+})).describe('Lead pipeline stage → what happens to the lead\'s live acquisition playbook enrollment when it enters that stage. Missing stages use the built-in defaults (outreach stages continue; everything else completes).'),zod.null()]).optional(),
   "updatedAt": zod.string().optional()
 })
 
@@ -2482,7 +2643,11 @@ export const UpdateSettingsBody = zod.object({
   "endHour": zod.int().describe('Exclusive end hour (1-24) of the allowed sending window.'),
   "days": zod.array(zod.string()).describe('Days sends are allowed (Mon..Sun).'),
   "maxTouchesPerDay": zod.int().describe('Max automated touches per contact per rolling 24h (0 = unlimited).')
-}).optional().describe('Quiet hours and frequency caps for automated outreach (playbooks + automation email\/SMS). Quiet hours defer sends into the next allowed window; they never drop them.')
+}).optional().describe('Quiet hours and frequency caps for automated outreach (playbooks + automation email\/SMS). Quiet hours defer sends into the next allowed window; they never drop them.'),
+  "playbookStageBehaviors": zod.record(zod.string(), zod.object({
+  "action": zod.enum(['continue', 'pause', 'complete', 'cancel', 'enroll']),
+  "enrollPlaybookId": zod.string().nullish().describe('Target playbook to hand the lead to (only for action \"enroll\").')
+})).optional().describe('Lead pipeline stage → what happens to the lead\'s live acquisition playbook enrollment when it enters that stage. Missing stages use the built-in defaults (outreach stages continue; everything else completes).')
 })
 
 export const UpdateSettingsResponse = zod.object({
@@ -2583,6 +2748,10 @@ export const UpdateSettingsResponse = zod.object({
   "days": zod.array(zod.string()).describe('Days sends are allowed (Mon..Sun).'),
   "maxTouchesPerDay": zod.int().describe('Max automated touches per contact per rolling 24h (0 = unlimited).')
 }).describe('Quiet hours and frequency caps for automated outreach (playbooks + automation email\/SMS). Quiet hours defer sends into the next allowed window; they never drop them.'),zod.null()]).optional(),
+  "playbookStageBehaviors": zod.union([zod.record(zod.string(), zod.object({
+  "action": zod.enum(['continue', 'pause', 'complete', 'cancel', 'enroll']),
+  "enrollPlaybookId": zod.string().nullish().describe('Target playbook to hand the lead to (only for action \"enroll\").')
+})).describe('Lead pipeline stage → what happens to the lead\'s live acquisition playbook enrollment when it enters that stage. Missing stages use the built-in defaults (outreach stages continue; everything else completes).'),zod.null()]).optional(),
   "updatedAt": zod.string().optional()
 })
 
@@ -2831,12 +3000,15 @@ export const ListPlaybooksResponseItem = zod.object({
   "id": zod.uuid(),
   "name": zod.string(),
   "seedKey": zod.string().nullish(),
+  "category": zod.enum(['acquisition', 'estimate_follow_up', 'reactivation', 'review_request', 'referral']).optional().describe('What kind of sequence this is; a lead can hold at most one live enrollment per category, so differently-categorized playbooks may run concurrently.'),
+  "kind": zod.enum(['outreach', 'post_sale']).optional(),
   "isActive": zod.boolean(),
   "enrollmentRules": zod.object({
   "minScore": zod.number().nullish(),
   "urgencies": zod.array(zod.string()).optional(),
   "serviceTypes": zod.array(zod.string()).optional(),
-  "sources": zod.array(zod.string()).optional()
+  "sources": zod.array(zod.string()).optional(),
+  "milestoneStatuses": zod.array(zod.string()).optional().describe('Post-sale milestone gating — enroll only when the lead reaches one of these statuses.')
 }),
   "steps": zod.array(zod.object({
   "channel": zod.enum(['email', 'sms']),
@@ -2848,7 +3020,8 @@ export const ListPlaybooksResponseItem = zod.object({
   "prompt": zod.string(),
   "subject": zod.string().optional()
 })).optional(),
-  "pinnedVariant": zod.string().optional()
+  "pinnedVariant": zod.string().optional(),
+  "linkKind": zod.enum(['review', 'referral']).optional().describe('Appends the contact\'s tokenized review\/referral engagement link to the message.')
 })),
   "updatedAt": zod.string().optional()
 })
@@ -2863,12 +3036,14 @@ export const ListPlaybooksResponse = zod.array(ListPlaybooksResponseItem)
 
 export const CreatePlaybookBody = zod.object({
   "name": zod.string().min(1),
+  "category": zod.enum(['acquisition', 'estimate_follow_up', 'reactivation', 'review_request', 'referral']).optional().describe('What kind of sequence this is; a lead can hold at most one live enrollment per category, so differently-categorized playbooks may run concurrently.'),
   "isActive": zod.boolean().optional(),
   "enrollmentRules": zod.object({
   "minScore": zod.number().nullish(),
   "urgencies": zod.array(zod.string()).optional(),
   "serviceTypes": zod.array(zod.string()).optional(),
-  "sources": zod.array(zod.string()).optional()
+  "sources": zod.array(zod.string()).optional(),
+  "milestoneStatuses": zod.array(zod.string()).optional().describe('Post-sale milestone gating — enroll only when the lead reaches one of these statuses.')
 }).optional(),
   "steps": zod.array(zod.object({
   "channel": zod.enum(['email', 'sms']),
@@ -2880,7 +3055,8 @@ export const CreatePlaybookBody = zod.object({
   "prompt": zod.string(),
   "subject": zod.string().optional()
 })).optional(),
-  "pinnedVariant": zod.string().optional()
+  "pinnedVariant": zod.string().optional(),
+  "linkKind": zod.enum(['review', 'referral']).optional().describe('Appends the contact\'s tokenized review\/referral engagement link to the message.')
 }))
 })
 
@@ -2888,12 +3064,15 @@ export const CreatePlaybookResponse = zod.object({
   "id": zod.uuid(),
   "name": zod.string(),
   "seedKey": zod.string().nullish(),
+  "category": zod.enum(['acquisition', 'estimate_follow_up', 'reactivation', 'review_request', 'referral']).optional().describe('What kind of sequence this is; a lead can hold at most one live enrollment per category, so differently-categorized playbooks may run concurrently.'),
+  "kind": zod.enum(['outreach', 'post_sale']).optional(),
   "isActive": zod.boolean(),
   "enrollmentRules": zod.object({
   "minScore": zod.number().nullish(),
   "urgencies": zod.array(zod.string()).optional(),
   "serviceTypes": zod.array(zod.string()).optional(),
-  "sources": zod.array(zod.string()).optional()
+  "sources": zod.array(zod.string()).optional(),
+  "milestoneStatuses": zod.array(zod.string()).optional().describe('Post-sale milestone gating — enroll only when the lead reaches one of these statuses.')
 }),
   "steps": zod.array(zod.object({
   "channel": zod.enum(['email', 'sms']),
@@ -2905,7 +3084,8 @@ export const CreatePlaybookResponse = zod.object({
   "prompt": zod.string(),
   "subject": zod.string().optional()
 })).optional(),
-  "pinnedVariant": zod.string().optional()
+  "pinnedVariant": zod.string().optional(),
+  "linkKind": zod.enum(['review', 'referral']).optional().describe('Appends the contact\'s tokenized review\/referral engagement link to the message.')
 })),
   "updatedAt": zod.string().optional()
 })
@@ -2923,12 +3103,14 @@ export const UpdatePlaybookParams = zod.object({
 
 export const UpdatePlaybookBody = zod.object({
   "name": zod.string().min(1).optional(),
+  "category": zod.enum(['acquisition', 'estimate_follow_up', 'reactivation', 'review_request', 'referral']).optional().describe('What kind of sequence this is; a lead can hold at most one live enrollment per category, so differently-categorized playbooks may run concurrently.'),
   "isActive": zod.boolean().optional(),
   "enrollmentRules": zod.object({
   "minScore": zod.number().nullish(),
   "urgencies": zod.array(zod.string()).optional(),
   "serviceTypes": zod.array(zod.string()).optional(),
-  "sources": zod.array(zod.string()).optional()
+  "sources": zod.array(zod.string()).optional(),
+  "milestoneStatuses": zod.array(zod.string()).optional().describe('Post-sale milestone gating — enroll only when the lead reaches one of these statuses.')
 }).optional(),
   "steps": zod.array(zod.object({
   "channel": zod.enum(['email', 'sms']),
@@ -2940,7 +3122,8 @@ export const UpdatePlaybookBody = zod.object({
   "prompt": zod.string(),
   "subject": zod.string().optional()
 })).optional(),
-  "pinnedVariant": zod.string().optional()
+  "pinnedVariant": zod.string().optional(),
+  "linkKind": zod.enum(['review', 'referral']).optional().describe('Appends the contact\'s tokenized review\/referral engagement link to the message.')
 })).optional()
 })
 
@@ -2948,12 +3131,15 @@ export const UpdatePlaybookResponse = zod.object({
   "id": zod.uuid(),
   "name": zod.string(),
   "seedKey": zod.string().nullish(),
+  "category": zod.enum(['acquisition', 'estimate_follow_up', 'reactivation', 'review_request', 'referral']).optional().describe('What kind of sequence this is; a lead can hold at most one live enrollment per category, so differently-categorized playbooks may run concurrently.'),
+  "kind": zod.enum(['outreach', 'post_sale']).optional(),
   "isActive": zod.boolean(),
   "enrollmentRules": zod.object({
   "minScore": zod.number().nullish(),
   "urgencies": zod.array(zod.string()).optional(),
   "serviceTypes": zod.array(zod.string()).optional(),
-  "sources": zod.array(zod.string()).optional()
+  "sources": zod.array(zod.string()).optional(),
+  "milestoneStatuses": zod.array(zod.string()).optional().describe('Post-sale milestone gating — enroll only when the lead reaches one of these statuses.')
 }),
   "steps": zod.array(zod.object({
   "channel": zod.enum(['email', 'sms']),
@@ -2965,7 +3151,8 @@ export const UpdatePlaybookResponse = zod.object({
   "prompt": zod.string(),
   "subject": zod.string().optional()
 })).optional(),
-  "pinnedVariant": zod.string().optional()
+  "pinnedVariant": zod.string().optional(),
+  "linkKind": zod.enum(['review', 'referral']).optional().describe('Appends the contact\'s tokenized review\/referral engagement link to the message.')
 })),
   "updatedAt": zod.string().optional()
 })
@@ -3870,6 +4057,132 @@ export const GetPortalPhotoResponse = zod.unknown()
 
 
 /**
+ * @summary List inbound lead-capture endpoints
+ */
+export const ListCaptureEndpointsResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "token": zod.string(),
+  "mapping": zod.record(zod.string(), zod.string()).describe('External payload field name -> MogulForge lead field name'),
+  "defaultSource": zod.string(),
+  "isActive": zod.boolean(),
+  "lastReceivedAt": zod.string().nullish(),
+  "receivedCount": zod.number(),
+  "createdAt": zod.string(),
+  "url": zod.string().optional().describe('Full inbound POST URL for this endpoint'),
+  "embedSnippet": zod.string().optional().describe('Paste-in script tag for the site form listener')
+})
+export const ListCaptureEndpointsResponse = zod.array(ListCaptureEndpointsResponseItem)
+
+
+/**
+ * @summary Create an inbound lead-capture endpoint
+ */
+export const CreateCaptureEndpointBody = zod.object({
+  "name": zod.string(),
+  "mapping": zod.record(zod.string(), zod.string()).describe('External payload field name -> MogulForge lead field name'),
+  "defaultSource": zod.string().optional()
+})
+
+export const CreateCaptureEndpointResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "token": zod.string(),
+  "mapping": zod.record(zod.string(), zod.string()).describe('External payload field name -> MogulForge lead field name'),
+  "defaultSource": zod.string(),
+  "isActive": zod.boolean(),
+  "lastReceivedAt": zod.string().nullish(),
+  "receivedCount": zod.number(),
+  "createdAt": zod.string(),
+  "url": zod.string().optional().describe('Full inbound POST URL for this endpoint'),
+  "embedSnippet": zod.string().optional().describe('Paste-in script tag for the site form listener')
+})
+
+
+/**
+ * @summary Update name, mapping, source, or active flag
+ */
+export const UpdateCaptureEndpointParams = zod.object({
+  "id": zod.uuid()
+})
+
+export const UpdateCaptureEndpointBody = zod.object({
+  "name": zod.string().optional(),
+  "mapping": zod.record(zod.string(), zod.string()).optional().describe('External payload field name -> MogulForge lead field name'),
+  "defaultSource": zod.string().optional(),
+  "isActive": zod.boolean().optional()
+})
+
+export const UpdateCaptureEndpointResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "token": zod.string(),
+  "mapping": zod.record(zod.string(), zod.string()).describe('External payload field name -> MogulForge lead field name'),
+  "defaultSource": zod.string(),
+  "isActive": zod.boolean(),
+  "lastReceivedAt": zod.string().nullish(),
+  "receivedCount": zod.number(),
+  "createdAt": zod.string(),
+  "url": zod.string().optional().describe('Full inbound POST URL for this endpoint'),
+  "embedSnippet": zod.string().optional().describe('Paste-in script tag for the site form listener')
+})
+
+
+/**
+ * @summary Deactivate a capture endpoint
+ */
+export const DeleteCaptureEndpointParams = zod.object({
+  "id": zod.uuid()
+})
+
+export const DeleteCaptureEndpointResponse = zod.void()
+
+
+/**
+ * @summary Apply a field mapping to a test payload without saving anything
+ */
+export const PreviewCaptureMappingBody = zod.object({
+  "mapping": zod.record(zod.string(), zod.string()).describe('External payload field name -> MogulForge lead field name'),
+  "payload": zod.record(zod.string(), zod.unknown())
+})
+
+export const PreviewCaptureMappingResponse = zod.object({
+  "firstName": zod.string().nullish(),
+  "lastName": zod.string().nullish(),
+  "email": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "addressLine1": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "postalCode": zod.string().nullish(),
+  "message": zod.string().nullish(),
+  "source": zod.string().nullish(),
+  "campaign": zod.string().nullish(),
+  "externalId": zod.string().nullish(),
+  "unmapped": zod.array(zod.string())
+})
+
+
+/**
+ * @summary Recent inbound deliveries (newest first, capped at 100)
+ */
+export const ListCaptureDeliveriesQueryParams = zod.object({
+  "endpointId": zod.coerce.string().optional()
+})
+
+export const ListCaptureDeliveriesResponseItem = zod.object({
+  "id": zod.string(),
+  "endpointId": zod.string(),
+  "idempotencyKey": zod.string().nullish(),
+  "leadId": zod.string().nullish(),
+  "outcome": zod.string(),
+  "detail": zod.string().nullish(),
+  "createdAt": zod.string()
+})
+export const ListCaptureDeliveriesResponse = zod.array(ListCaptureDeliveriesResponseItem)
+
+
+/**
  * @summary Revoke the current portal session
  */
 export const LogoutPortalSessionHeader = zod.object({
@@ -3878,6 +4191,137 @@ export const LogoutPortalSessionHeader = zod.object({
 
 export const LogoutPortalSessionResponse = zod.object({
   "ok": zod.boolean()
+})
+
+
+/**
+ * @summary Session probe that works before the user belongs to an organization
+ */
+export const GetSessionResponse = zod.object({
+  "id": zod.string(),
+  "email": zod.string().nullish(),
+  "firstName": zod.string().nullish(),
+  "lastName": zod.string().nullish(),
+  "role": zod.string(),
+  "isPlatformAdmin": zod.boolean(),
+  "organization": zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "timezone": zod.string()
+}).nullish()
+})
+
+
+/**
+ * @summary Create a new organization (creator becomes its owner)
+ */
+export const CreateOrgBody = zod.object({
+  "name": zod.string(),
+  "slug": zod.string().optional(),
+  "timezone": zod.string().optional()
+})
+
+export const CreateOrgResponse = zod.object({
+  "organization": zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "timezone": zod.string()
+}),
+  "joined": zod.boolean().optional()
+})
+
+
+/**
+ * @summary Platform admin — list all organizations
+ */
+export const ListPlatformOrgsResponse = zod.object({
+  "organizations": zod.array(zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "timezone": zod.string(),
+  "createdAt": zod.string(),
+  "memberCount": zod.number()
+}))
+})
+
+
+/**
+ * @summary Platform admin — rename an organization or change its timezone
+ */
+export const UpdatePlatformOrgParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const UpdatePlatformOrgBody = zod.object({
+  "name": zod.string().optional(),
+  "timezone": zod.string().optional()
+})
+
+export const UpdatePlatformOrgResponse = zod.object({
+  "organization": zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "timezone": zod.string()
+}),
+  "joined": zod.boolean().optional()
+})
+
+
+/**
+ * @summary Get onboarding wizard progress
+ */
+export const GetOnboardingResponse = zod.object({
+  "steps": zod.array(zod.string()),
+  "state": zod.object({
+  "completedSteps": zod.array(zod.string()),
+  "currentStep": zod.string().optional(),
+  "completedAt": zod.string().nullish(),
+  "dismissedAt": zod.string().nullish()
+})
+})
+
+
+/**
+ * @summary Record onboarding wizard progress
+ */
+export const UpdateOnboardingBody = zod.object({
+  "completeSteps": zod.array(zod.string()).optional(),
+  "currentStep": zod.string().optional(),
+  "launched": zod.boolean().optional(),
+  "dismissed": zod.boolean().optional()
+})
+
+export const UpdateOnboardingResponse = zod.object({
+  "steps": zod.array(zod.string()),
+  "state": zod.object({
+  "completedSteps": zod.array(zod.string()),
+  "currentStep": zod.string().optional(),
+  "completedAt": zod.string().nullish(),
+  "dismissedAt": zod.string().nullish()
+})
+})
+
+
+/**
+ * @summary Create the guided sandbox test lead (never contacts a real customer)
+ */
+export const CreateOnboardingTestLeadResponse = zod.object({
+  "leadId": zod.string(),
+  "contactId": zod.string(),
+  "score": zod.number(),
+  "enrolled": zod.boolean()
+})
+
+
+/**
+ * @summary Remove the sandbox test lead and its demo records
+ */
+export const DeleteOnboardingTestLeadResponse = zod.object({
+  "removed": zod.number()
 })
 
 

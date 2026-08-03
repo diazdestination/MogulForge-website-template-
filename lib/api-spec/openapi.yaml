@@ -2201,6 +2201,121 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/reports/roi:
+    get:
+      operationId: getRoiReport
+      tags: [dashboard]
+      summary: Organization ROI report with honest revenue attribution
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: ROI report for the requested window
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoiReport"
+  /v1/reports/roi/export:
+    get:
+      operationId: exportRoiReport
+      tags: [dashboard]
+      summary: ROI report flattened to CSV
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: CSV download
+          content:
+            text/csv:
+              schema:
+                type: string
+  /v1/public/referrals/{token}:
+    get:
+      operationId: getReferralLinkInfo
+      tags: [public]
+      summary: Business info for a tokenized referral form
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Referral link info
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [businessName]
+                properties:
+                  businessName:
+                    type: string
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    post:
+      operationId: submitReferral
+      tags: [public]
+      summary: Submit a referral (creates an attributed lead)
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReferralSubmissionInput"
+      responses:
+        "201":
+          description: Referral captured
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, leadId]
+                properties:
+                  ok:
+                    type: boolean
+                  leadId:
+                    type: string
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/public/el/{token}:
+    get:
+      operationId: followEngagementLink
+      tags: [public]
+      summary: Tracked review-link click-through (302 redirect)
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirect to the review destination
+        "404":
+          description: Not found
   /v1/public/analytics-events:
     post:
       operationId: trackAnalyticsEvent
@@ -3459,6 +3574,128 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/capture-endpoints:
+    get:
+      operationId: listCaptureEndpoints
+      tags: [capture]
+      summary: List inbound lead-capture endpoints
+      responses:
+        "200":
+          description: Capture endpoints, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CaptureEndpoint"
+    post:
+      operationId: createCaptureEndpoint
+      tags: [capture]
+      summary: Create an inbound lead-capture endpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CaptureEndpointInput"
+      responses:
+        "201":
+          description: Created endpoint (token included)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaptureEndpoint"
+        "400":
+          description: Invalid endpoint
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/capture-endpoints/{id}:
+    patch:
+      operationId: updateCaptureEndpoint
+      tags: [capture]
+      summary: Update name, mapping, source, or active flag
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CaptureEndpointUpdate"
+      responses:
+        "200":
+          description: Updated endpoint
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaptureEndpoint"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    delete:
+      operationId: deleteCaptureEndpoint
+      tags: [capture]
+      summary: Deactivate a capture endpoint
+      parameters:
+        - $ref: "#/components/parameters/IdPathParam"
+      responses:
+        "204":
+          description: Deactivated
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/capture-endpoints/preview:
+    post:
+      operationId: previewCaptureMapping
+      tags: [capture]
+      summary: Apply a field mapping to a test payload without saving anything
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CaptureMappingPreviewRequest"
+      responses:
+        "200":
+          description: Mapped lead fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaptureMappingPreview"
+        "400":
+          description: Invalid mapping
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/capture-deliveries:
+    get:
+      operationId: listCaptureDeliveries
+      tags: [capture]
+      summary: Recent inbound deliveries (newest first, capped at 100)
+      parameters:
+        - name: endpointId
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deliveries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CaptureDelivery"
   /v1/portal/logout:
     post:
       operationId: logoutPortalSession
@@ -3477,6 +3714,160 @@ paths:
                 properties:
                   ok:
                     type: boolean
+  /v1/session:
+    get:
+      operationId: getSession
+      tags: [orgs]
+      summary: Session probe that works before the user belongs to an organization
+      responses:
+        "200":
+          description: Signed-in user with optional organization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionProfile"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/orgs:
+    post:
+      operationId: createOrg
+      tags: [orgs]
+      summary: Create a new organization (creator becomes its owner)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrgInput"
+      responses:
+        "201":
+          description: Organization created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgEnvelope"
+        "400":
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: Already in an organization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/platform/orgs:
+    get:
+      operationId: listPlatformOrgs
+      tags: [orgs]
+      summary: Platform admin — list all organizations
+      responses:
+        "200":
+          description: Organizations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformOrgList"
+        "403":
+          description: Platform admin access required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/platform/orgs/{id}:
+    patch:
+      operationId: updatePlatformOrg
+      tags: [orgs]
+      summary: Platform admin — rename an organization or change its timezone
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePlatformOrgInput"
+      responses:
+        "200":
+          description: Updated organization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrgEnvelope"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/onboarding:
+    get:
+      operationId: getOnboarding
+      tags: [onboarding]
+      summary: Get onboarding wizard progress
+      responses:
+        "200":
+          description: Wizard steps and state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingResponse"
+    patch:
+      operationId: updateOnboarding
+      tags: [onboarding]
+      summary: Record onboarding wizard progress
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OnboardingPatchInput"
+      responses:
+        "200":
+          description: Updated wizard state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OnboardingResponse"
+        "400":
+          description: Invalid step
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/onboarding/test-lead:
+    post:
+      operationId: createOnboardingTestLead
+      tags: [onboarding]
+      summary: Create the guided sandbox test lead (never contacts a real customer)
+      responses:
+        "201":
+          description: Test lead created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TestLeadResponse"
+    delete:
+      operationId: deleteOnboardingTestLead
+      tags: [onboarding]
+      summary: Remove the sandbox test lead and its demo records
+      responses:
+        "200":
+          description: Cleanup result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TestLeadCleanupResponse"
 components:
   parameters:
     IdPathParam:
@@ -4170,6 +4561,16 @@ components:
           type: [string, "null"]
         estimatedValueCents:
           type: [integer, "null"]
+        lostReason:
+          type: [string, "null"]
+        wonAt:
+          type: [string, "null"]
+          format: date-time
+        wonRevenueCents:
+          type: [integer, "null"]
+        wonAttribution:
+          type: [string, "null"]
+          description: Honest revenue-attribution category recorded at win time (directly_attributed | assisted | self_reported | estimated | unknown).
         hasUnreadPortalMessage:
           type: boolean
           description: True when the homeowner has sent a portal_message more recently than the last team_message reply (list endpoints only).
@@ -4230,6 +4631,160 @@ components:
           type: [string, "null"]
         estimatedValueCents:
           type: [integer, "null"]
+        lostReason:
+          type: [string, "null"]
+    ReferralSubmissionInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        email:
+          type: [string, "null"]
+        phone:
+          type: [string, "null"]
+        notes:
+          type: [string, "null"]
+    RoiBreakdownRow:
+      type: object
+      required: [key, count]
+      properties:
+        key:
+          type: string
+        count:
+          type: integer
+    RoiReport:
+      type: object
+      required:
+        [windowDays, generatedAt, leads, appointments, responsiveness, playbooks, reviewsAndReferrals, reactivation, outcomes]
+      properties:
+        windowDays:
+          type: integer
+        generatedAt:
+          type: string
+          format: date-time
+        leads:
+          type: object
+          required: [total, qualified, bySource, byCampaign, byTool, byLandingPage, byServiceType]
+          properties:
+            total:
+              type: integer
+            qualified:
+              type: integer
+            bySource:
+              type: array
+              items:
+                $ref: "#/components/schemas/RoiBreakdownRow"
+            byCampaign:
+              type: array
+              items:
+                $ref: "#/components/schemas/RoiBreakdownRow"
+            byTool:
+              type: array
+              items:
+                $ref: "#/components/schemas/RoiBreakdownRow"
+            byLandingPage:
+              type: array
+              items:
+                $ref: "#/components/schemas/RoiBreakdownRow"
+            byServiceType:
+              type: array
+              items:
+                $ref: "#/components/schemas/RoiBreakdownRow"
+        appointments:
+          type: object
+          required: [total, leadsWithAppointment]
+          properties:
+            total:
+              type: integer
+            leadsWithAppointment:
+              type: integer
+            appointmentRatePct:
+              type: [integer, "null"]
+        responsiveness:
+          type: object
+          required: [leadsContacted, leadsReplied]
+          properties:
+            leadsContacted:
+              type: integer
+            leadsReplied:
+              type: integer
+            responseRatePct:
+              type: [integer, "null"]
+            medianMinutesToFirstTouch:
+              type: [integer, "null"]
+        playbooks:
+          type: array
+          items:
+            type: object
+            required: [playbookId, name, kind, sent, replied, booked, won]
+            properties:
+              playbookId:
+                type: string
+              name:
+                type: string
+              kind:
+                type: string
+              sent:
+                type: integer
+              replied:
+                type: integer
+              booked:
+                type: integer
+              won:
+                type: integer
+        reviewsAndReferrals:
+          type: object
+          required: [reviewRequestsSent, reviewLinkClicks, referralRequestsSent, referralSubmissions, referralLeads]
+          properties:
+            reviewRequestsSent:
+              type: integer
+            reviewLinkClicks:
+              type: integer
+            referralRequestsSent:
+              type: integer
+            referralSubmissions:
+              type: integer
+            referralLeads:
+              type: integer
+        reactivation:
+          type: object
+          required: [campaignsLaunched, leadsEnrolled, leadsReplied]
+          properties:
+            campaignsLaunched:
+              type: integer
+            leadsEnrolled:
+              type: integer
+            leadsReplied:
+              type: integer
+        outcomes:
+          type: object
+          required: [won, revenueWonCents, revenueByAttribution, pipelineValueCents, lost, lostReasons]
+          properties:
+            won:
+              type: integer
+            revenueWonCents:
+              type: integer
+            revenueByAttribution:
+              type: array
+              items:
+                type: object
+                required: [category, count, revenueCents]
+                properties:
+                  category:
+                    type: string
+                  count:
+                    type: integer
+                  revenueCents:
+                    type: integer
+            pipelineValueCents:
+              type: integer
+            lost:
+              type: integer
+            lostReasons:
+              type: array
+              items:
+                $ref: "#/components/schemas/RoiBreakdownRow"
     EstimateStatus:
       type: string
       enum: [draft, sent, accepted, declined]
@@ -5157,6 +5712,10 @@ components:
           oneOf:
             - $ref: "#/components/schemas/SendingHoursSettings"
             - type: "null"
+        playbookStageBehaviors:
+          oneOf:
+            - $ref: "#/components/schemas/PlaybookStageBehaviors"
+            - type: "null"
         updatedAt:
           type: string
     OrgSettingsInput:
@@ -5196,6 +5755,23 @@ components:
           $ref: "#/components/schemas/ConciergeSettings"
         sendingHours:
           $ref: "#/components/schemas/SendingHoursSettings"
+        playbookStageBehaviors:
+          $ref: "#/components/schemas/PlaybookStageBehaviors"
+    PlaybookStageBehaviors:
+      type: object
+      description: Lead pipeline stage → what happens to the lead's live acquisition playbook enrollment when it enters that stage. Missing stages use the built-in defaults (outreach stages continue; everything else completes).
+      additionalProperties:
+        $ref: "#/components/schemas/StageBehavior"
+    StageBehavior:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [continue, pause, complete, cancel, enroll]
+        enrollPlaybookId:
+          type: [string, "null"]
+          description: Target playbook to hand the lead to (only for action "enroll").
     SendingHoursSettings:
       type: object
       description: Quiet hours and frequency caps for automated outreach (playbooks + automation email/SMS). Quiet hours defer sends into the next allowed window; they never drop them.
@@ -6177,6 +6753,10 @@ components:
             $ref: "#/components/schemas/PlaybookStepVariant"
         pinnedVariant:
           type: string
+        linkKind:
+          type: string
+          enum: [review, referral]
+          description: Appends the contact's tokenized review/referral engagement link to the message.
     PlaybookStepVariant:
       type: object
       required: [key, prompt]
@@ -6307,6 +6887,11 @@ components:
           type: array
           items:
             type: string
+        milestoneStatuses:
+          type: array
+          items:
+            type: string
+          description: Post-sale milestone gating — enroll only when the lead reaches one of these statuses.
     Playbook:
       type: object
       required: [id, name, isActive, enrollmentRules, steps]
@@ -6319,6 +6904,11 @@ components:
         seedKey:
           type: string
           nullable: true
+        category:
+          $ref: "#/components/schemas/PlaybookCategory"
+        kind:
+          type: string
+          enum: [outreach, post_sale]
         isActive:
           type: boolean
         enrollmentRules:
@@ -6329,6 +6919,10 @@ components:
             $ref: "#/components/schemas/PlaybookStep"
         updatedAt:
           type: string
+    PlaybookCategory:
+      type: string
+      description: What kind of sequence this is; a lead can hold at most one live enrollment per category, so differently-categorized playbooks may run concurrently.
+      enum: [acquisition, estimate_follow_up, reactivation, review_request, referral]
     PlaybookInput:
       type: object
       required: [name, steps]
@@ -6336,6 +6930,8 @@ components:
         name:
           type: string
           minLength: 1
+        category:
+          $ref: "#/components/schemas/PlaybookCategory"
         isActive:
           type: boolean
         enrollmentRules:
@@ -6350,6 +6946,8 @@ components:
         name:
           type: string
           minLength: 1
+        category:
+          $ref: "#/components/schemas/PlaybookCategory"
         isActive:
           type: boolean
         enrollmentRules:
@@ -6526,6 +7124,135 @@ components:
                 nullable: true
               createdAt:
                 type: string
+    CaptureFieldMapping:
+      type: object
+      description: External payload field name -> MogulForge lead field name
+      additionalProperties:
+        type: string
+    CaptureEndpointInput:
+      type: object
+      required: [name, mapping]
+      properties:
+        name:
+          type: string
+        mapping:
+          $ref: "#/components/schemas/CaptureFieldMapping"
+        defaultSource:
+          type: string
+    CaptureEndpointUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        mapping:
+          $ref: "#/components/schemas/CaptureFieldMapping"
+        defaultSource:
+          type: string
+        isActive:
+          type: boolean
+    CaptureEndpoint:
+      type: object
+      required: [id, name, token, mapping, defaultSource, isActive, receivedCount, createdAt]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        token:
+          type: string
+        mapping:
+          $ref: "#/components/schemas/CaptureFieldMapping"
+        defaultSource:
+          type: string
+        isActive:
+          type: boolean
+        lastReceivedAt:
+          type: string
+          nullable: true
+        receivedCount:
+          type: number
+        createdAt:
+          type: string
+        url:
+          type: string
+          description: Full inbound POST URL for this endpoint
+        embedSnippet:
+          type: string
+          description: Paste-in script tag for the site form listener
+    CaptureMappingPreviewRequest:
+      type: object
+      required: [mapping, payload]
+      properties:
+        mapping:
+          $ref: "#/components/schemas/CaptureFieldMapping"
+        payload:
+          type: object
+          additionalProperties: true
+    CaptureMappingPreview:
+      type: object
+      required: [unmapped]
+      properties:
+        firstName:
+          type: string
+          nullable: true
+        lastName:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        addressLine1:
+          type: string
+          nullable: true
+        city:
+          type: string
+          nullable: true
+        state:
+          type: string
+          nullable: true
+        postalCode:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+        source:
+          type: string
+          nullable: true
+        campaign:
+          type: string
+          nullable: true
+        externalId:
+          type: string
+          nullable: true
+        unmapped:
+          type: array
+          items:
+            type: string
+    CaptureDelivery:
+      type: object
+      required: [id, endpointId, outcome, createdAt]
+      properties:
+        id:
+          type: string
+        endpointId:
+          type: string
+        idempotencyKey:
+          type: string
+          nullable: true
+        leadId:
+          type: string
+          nullable: true
+        outcome:
+          type: string
+        detail:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
     ReactivationCampaignInput:
       type: object
       required: [name, playbookId]
@@ -6969,3 +7696,144 @@ components:
           type: string
           minLength: 1
           maxLength: 4000
+    SessionOrganization:
+      type: object
+      required: [id, name, slug, timezone]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        timezone:
+          type: string
+    SessionProfile:
+      type: object
+      required: [id, role, isPlatformAdmin]
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          nullable: true
+        firstName:
+          type: string
+          nullable: true
+        lastName:
+          type: string
+          nullable: true
+        role:
+          type: string
+        isPlatformAdmin:
+          type: boolean
+        organization:
+          allOf:
+            - $ref: "#/components/schemas/SessionOrganization"
+          nullable: true
+    CreateOrgInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        timezone:
+          type: string
+    UpdatePlatformOrgInput:
+      type: object
+      properties:
+        name:
+          type: string
+        timezone:
+          type: string
+    OrgEnvelope:
+      type: object
+      required: [organization]
+      properties:
+        organization:
+          $ref: "#/components/schemas/SessionOrganization"
+        joined:
+          type: boolean
+    PlatformOrg:
+      type: object
+      required: [id, name, slug, timezone, createdAt, memberCount]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        timezone:
+          type: string
+        createdAt:
+          type: string
+        memberCount:
+          type: number
+    PlatformOrgList:
+      type: object
+      required: [organizations]
+      properties:
+        organizations:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformOrg"
+    OnboardingState:
+      type: object
+      required: [completedSteps]
+      properties:
+        completedSteps:
+          type: array
+          items:
+            type: string
+        currentStep:
+          type: string
+        completedAt:
+          type: string
+          nullable: true
+        dismissedAt:
+          type: string
+          nullable: true
+    OnboardingResponse:
+      type: object
+      required: [steps, state]
+      properties:
+        steps:
+          type: array
+          items:
+            type: string
+        state:
+          $ref: "#/components/schemas/OnboardingState"
+    OnboardingPatchInput:
+      type: object
+      properties:
+        completeSteps:
+          type: array
+          items:
+            type: string
+        currentStep:
+          type: string
+        launched:
+          type: boolean
+        dismissed:
+          type: boolean
+    TestLeadResponse:
+      type: object
+      required: [leadId, contactId, score, enrolled]
+      properties:
+        leadId:
+          type: string
+        contactId:
+          type: string
+        score:
+          type: number
+        enrolled:
+          type: boolean
+    TestLeadCleanupResponse:
+      type: object
+      required: [removed]
+      properties:
+        removed:
+          type: number

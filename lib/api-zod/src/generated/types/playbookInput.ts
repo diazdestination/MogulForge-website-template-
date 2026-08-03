@@ -5,12 +5,14 @@
  * Painless GrowthOS API
  * OpenAPI spec version: 0.1.0
  */
+import type { PlaybookCategory } from './playbookCategory';
 import type { PlaybookRules } from './playbookRules';
 import type { PlaybookStep } from './playbookStep';
 
 export interface PlaybookInput {
   /** @minLength 1 */
   name: string;
+  category?: PlaybookCategory;
   isActive?: boolean;
   enrollmentRules?: PlaybookRules;
   steps: PlaybookStep[];

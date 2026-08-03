@@ -27,6 +27,20 @@ interface RouteEntry {
 //   session token (x-portal-token) plus rate limiting, not requireMember.
 const PUBLIC_ROUTE_PREFIXES = ["/public", "/portal"];
 
+// Routes that authenticate a SESSION USER but intentionally do not require an
+// organization membership, so they cannot use requireMember:
+// - GET /session and POST /orgs must work for signed-in users who don't
+//   belong to an org yet (self-serve org creation flow).
+// - /platform/* is gated by the platform super-admin flag (requireSessionUser
+//   + isPlatformAdmin), which is deliberately org-independent.
+// Adding a route here is an explicit, reviewable decision.
+const SESSION_ONLY_ROUTES = new Set([
+  "GET /session",
+  "POST /orgs",
+  "GET /platform/orgs",
+  "PATCH /platform/orgs/:id",
+]);
+
 /**
  * The authorization contract: every protected `METHOD path` in the v1 API and
  * the permission its requireMember guard must carry.
@@ -112,6 +126,8 @@ const EXPECTED_PERMISSIONS: Record<string, Permission> = {
   // dashboard & audit
   "GET /dashboard/summary": "crm.read",
   "GET /dashboard/marketing": "crm.read",
+  "GET /reports/roi": "crm.read",
+  "GET /reports/roi/export": "crm.read",
   "GET /audit-events": "audit.read",
   // settings surfaces
   "GET /settings": "crm.read",
@@ -160,6 +176,13 @@ const EXPECTED_PERMISSIONS: Record<string, Permission> = {
   "POST /enrollments/:id/pause": "crm.write",
   "POST /enrollments/:id/resume": "crm.write",
   "POST /enrollments/:id/skip": "crm.write",
+  // external lead capture (inbound webhook endpoints + mapping)
+  "GET /capture-endpoints": "crm.read",
+  "POST /capture-endpoints": "crm.write",
+  "PATCH /capture-endpoints/:id": "crm.write",
+  "DELETE /capture-endpoints/:id": "crm.delete",
+  "POST /capture-endpoints/preview": "crm.read",
+  "GET /capture-deliveries": "crm.read",
   // reactivation (CSV import + win-back campaigns)
   "POST /lead-imports": "crm.write",
   "GET /lead-imports": "crm.read",
@@ -185,6 +208,12 @@ const EXPECTED_PERMISSIONS: Record<string, Permission> = {
   "POST /tags": "crm.write",
   // storage (photo streaming; service layer verifies org linkage)
   "GET /storage/objects/*path": "crm.read",
+  // onboarding wizard: reading progress is fine for any member; writing
+  // progress and running the sandbox demo configure the org.
+  "GET /onboarding": "crm.read",
+  "PATCH /onboarding": "settings.manage",
+  "POST /onboarding/test-lead": "settings.manage",
+  "DELETE /onboarding/test-lead": "settings.manage",
 };
 
 // DELETE routes allowed to use something weaker than crm.delete, with the
@@ -195,6 +224,9 @@ const DELETE_EXEMPTIONS: Record<string, Permission> = {
   // Removes one photo path from a lead's activity row, not the lead itself;
   // write-level access is the correct bar.
   "DELETE /leads/:id/photos": "crm.write",
+  // Removes only the sandbox demo lead the wizard created; org-configuration
+  // level access is the right bar.
+  "DELETE /onboarding/test-lead": "settings.manage",
 };
 
 function isTaggedGuard(
@@ -257,8 +289,10 @@ const isPublic = (path: string) =>
   PUBLIC_ROUTE_PREFIXES.some(
     (prefix) => path === prefix || path.startsWith(`${prefix}/`),
   );
-const protectedRoutes = routes.filter((r) => !isPublic(r.path));
 const keyOf = (r: RouteEntry) => `${r.method} ${r.path}`;
+const protectedRoutes = routes.filter(
+  (r) => !isPublic(r.path) && !SESSION_ONLY_ROUTES.has(keyOf(r)),
+);
 
 describe("v1 route inventory", () => {
   it("discovers a non-trivial number of routes (walker sanity check)", () => {

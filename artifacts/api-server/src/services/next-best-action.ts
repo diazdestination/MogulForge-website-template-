@@ -9,10 +9,9 @@ import {
 } from "@workspace/db";
 import { and, desc, eq, gt, inArray, or, sql } from "drizzle-orm";
 
-import { CLIENT } from "../lib/client.config";
 import * as crm from "./crm";
 import { draftOutreachMessage } from "./providers";
-import { getOrgSettings } from "./settings";
+import { getBusinessName, getOrgSettings } from "./settings";
 
 /**
  * Next-best-action copilot: turns the Closer Engine's signals (score,
@@ -327,7 +326,7 @@ async function buildDraft(
   }
   const settings = await getOrgSettings(organizationId);
   const businessName =
-    settings.businessProfile.businessName ?? CLIENT.businessShortName;
+    await getBusinessName(organizationId);
   const prompts: Record<string, string> = {
     send_message:
       "Personal check-in from their rep. Warm, short, one clear next step (book the free inspection or reply with questions). No pressure.",

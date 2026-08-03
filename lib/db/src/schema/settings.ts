@@ -290,6 +290,18 @@ export const DEFAULT_SENDING_HOURS: SendingHoursSettings = {
   maxTouchesPerDay: 0,
 };
 
+/**
+ * What a pipeline-stage transition does to the lead's live ACQUISITION
+ * outreach enrollment. "continue" leaves it running; "pause" pauses it (a
+ * rep can resume); "complete" ends it as a success; "cancel" stops it;
+ * "enroll" completes it and enrolls the lead into another playbook.
+ */
+export type StageBehaviorAction =
+  | "continue"
+  | "pause"
+  | "complete"
+  | "cancel"
+  | "enroll";
 /** Google Business Profile connection for the reviews widget. */
 export interface GoogleReviewsConfig {
   placeId?: string;
@@ -297,6 +309,85 @@ export interface GoogleReviewsConfig {
 }
 
 /** One row per organization: configurable business settings (never hard-coded). */
+/**
+ * Resumable onboarding wizard progress. Steps are identified by stable keys
+ * (e.g. "company", "services", "hours", "channels", "booking", "playbook",
+ * "concierge", "domain", "snippet", "verify", "test-lead", "launch").
+ */
+export interface OnboardingState {
+  /** Step keys the org has completed, in completion order. */
+  completedSteps: string[];
+  /** Step key the user was last on (for resume). */
+  currentStep?: string;
+  /** Set when the wizard was finished ("launched"). ISO timestamp. */
+  completedAt?: string | null;
+  /** Set when an admin dismissed the wizard without finishing. */
+  dismissedAt?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Industry-neutral defaults for NEW organizations.
+//
+// The roofing-flavored DEFAULT_* constants above match the historical
+// behavior of the original (Painless Roofing) tenant, whose settings rows are
+// seeded explicitly with those values. Fresh orgs created through the
+// self-serve flow get these generic defaults instead — no industry
+// assumptions, no borrowed branding.
+// ---------------------------------------------------------------------------
+
+export const GENERIC_CONCIERGE_INTENTS: ConciergeIntent[] = [
+  { key: "urgent", label: "Urgent issue", service: "general", points: 30, reason: "Urgent issue reported", urgency: "high", triage: true, keywords: ["urgent", "emergency", "asap", "right away"] },
+  { key: "quote", label: "Request a quote", service: "general", points: 20, reason: "Quote requested", urgency: "normal", triage: false, keywords: ["quote", "estimate", "price", "cost", "how much"] },
+  { key: "appointment", label: "Book an appointment", service: "general", points: 15, reason: "Appointment requested", urgency: "normal", triage: false, keywords: ["appointment", "schedule", "book", "visit", "come out"] },
+  { key: "question", label: "General question", service: "general", points: 5, reason: "General inquiry", urgency: "normal", triage: false, keywords: ["question", "info", "information", "help"] },
+];
+
+export const GENERIC_CONCIERGE_SETTINGS: Required<ConciergeSettings> = {
+  assistantName: "AI Assistant",
+  greeting:
+    "Hi! I'm the team's AI assistant. Tell me what you need and I'll get you to the right person — usually in about a minute.",
+  intents: GENERIC_CONCIERGE_INTENTS,
+  intakeDisclaimer:
+    "Just so you know — I can't make pricing or professional determinations in chat. I'll collect the details so the team can follow up with real answers.",
+  emergencySafety:
+    "⚠️ If this is a life-threatening emergency, please call 911 first. If anything at the property looks unsafe, keep your distance until a professional arrives.",
+  emergencyEscalation:
+    "I'm flagging this as urgent — the team treats these as top priority. Give me about 60 seconds of questions and I'll get a priority callback set up.",
+  unknownAnswerFallback:
+    "Good question — I don't have that in my notes, so I won't guess. I'll flag it for the team so a real person follows up with the answer.",
+  wrapUpNote:
+    "The team will confirm the details with you directly — nothing in this chat is a final price or professional determination.",
+};
+
+/** Industry-neutral reminder copy for fresh orgs (same timing default). */
+export const GENERIC_APPOINTMENT_REMINDER: AppointmentReminderSettings = {
+  leadTimeHours: 24,
+  smsBody:
+    "{{business.name}} reminder: your appointment is coming up, {{appointment.window}}. {{reschedule.line}}",
+  emailSubject: "Reminder: your appointment — {{appointment.window}}",
+  emailBody: [
+    "Hi {{contact.firstName}},",
+    "",
+    "A quick reminder that your appointment with {{business.name}} is coming up:",
+    "🗓 When: {{appointment.window}}",
+    "",
+    "{{reschedule.line}}",
+    "",
+    "— {{business.name}}",
+  ].join("\n"),
+};
+
+/** Industry-neutral scoring weights for fresh orgs (same structural bonuses). */
+export const GENERIC_LEAD_SCORING: LeadScoringSettings = {
+  ...DEFAULT_LEAD_SCORING,
+  intentPoints: {
+    urgent: 30,
+    quote: 20,
+    appointment: 15,
+    general: 10,
+  },
+};
+
 export const orgSettingsTable = pgTable(
   "org_settings",
   {
@@ -330,11 +421,15 @@ export const orgSettingsTable = pgTable(
     concierge: jsonb("concierge").$type<Partial<ConciergeSettings> | null>(),
     /** Quiet hours + frequency caps for automated outreach. */
     sendingHours: jsonb("sending_hours").$type<Partial<SendingHoursSettings> | null>(),
+    /** Per-stage behavior for live acquisition playbook enrollments. */
+    playbookStageBehaviors: jsonb("playbook_stage_behaviors").$type<PlaybookStageBehaviors | null>(),
     // Brute-force security alerts recorded at or before this instant have been
     // acknowledged by an admin and should no longer render as an active banner.
     securityAlertsAcknowledgedAt: timestamp("security_alerts_acknowledged_at", {
       withTimezone: true,
     }),
+    /** Guided onboarding wizard progress (resumable, per-org). */
+    onboarding: jsonb("onboarding").$type<OnboardingState | null>(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -353,3 +448,44 @@ export const insertOrgSettingsSchema = createInsertSchema(orgSettingsTable).omit
 });
 export type InsertOrgSettings = z.infer<typeof insertOrgSettingsSchema>;
 export type OrgSettings = typeof orgSettingsTable.$inferSelect;
+
+/** Lead status → behavior. Missing stages fall back to the defaults. */
+export type PlaybookStageBehaviors = Record<string, StageBehavior>;
+
+/**
+ * Defaults preserve historical behavior exactly: outreach stages keep the
+ * sequence running; every other stage completes the enrollment.
+ */
+export const DEFAULT_PLAYBOOK_STAGE_BEHAVIORS: PlaybookStageBehaviors = {
+  new: { action: "continue" },
+  ai_qualified: { action: "continue" },
+  contact_attempted: { action: "continue" },
+  follow_up: { action: "continue" },
+  nurture: { action: "continue" },
+  inspection_scheduled: { action: "complete" },
+  inspection_completed: { action: "complete" },
+  estimate_preparing: { action: "complete" },
+  estimate_sent: { action: "complete" },
+  claim_pending: { action: "complete" },
+  won: { action: "complete" },
+  production_scheduled: { action: "complete" },
+  in_progress: { action: "complete" },
+  final_walkthrough: { action: "complete" },
+  completed: { action: "complete" },
+  review_requested: { action: "complete" },
+  lost: { action: "complete" },
+};
+
+export const STAGE_BEHAVIOR_ACTIONS: StageBehaviorAction[] = [
+  "continue",
+  "pause",
+  "complete",
+  "cancel",
+  "enroll",
+];
+
+export interface StageBehavior {
+  action: StageBehaviorAction;
+  /** Target playbook to hand the lead to (only for action "enroll"). */
+  enrollPlaybookId?: string | null;
+}

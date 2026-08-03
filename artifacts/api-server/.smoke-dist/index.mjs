@@ -313,9 +313,9 @@ var require_postgres_interval = __commonJS({
     var NUMBER = "([+-]?\\d+)";
     var YEAR = NUMBER + "\\s+years?";
     var MONTH = NUMBER + "\\s+mons?";
-    var DAY = NUMBER + "\\s+days?";
+    var DAY2 = NUMBER + "\\s+days?";
     var TIME = "([+-])?([\\d]*):(\\d\\d):(\\d\\d)\\.?(\\d{1,6})?";
-    var INTERVAL = new RegExp([YEAR, MONTH, DAY, TIME].map(function(regexString) {
+    var INTERVAL = new RegExp([YEAR, MONTH, DAY2, TIME].map(function(regexString) {
       return "(" + regexString + ")?";
     }).join("\\s*"));
     var positions = {
@@ -1200,7 +1200,7 @@ var require_utils2 = __commonJS({
     var nodeCrypto = __require("crypto");
     module.exports = {
       postgresMd5PasswordHash,
-      randomBytes: randomBytes6,
+      randomBytes: randomBytes8,
       deriveKey,
       sha256: sha2562,
       hashByName,
@@ -1210,7 +1210,7 @@ var require_utils2 = __commonJS({
     var webCrypto = nodeCrypto.webcrypto || globalThis.crypto;
     var subtleCrypto = webCrypto.subtle;
     var textEncoder = new TextEncoder();
-    function randomBytes6(length) {
+    function randomBytes8(length) {
       return webCrypto.getRandomValues(Buffer.alloc(length));
     }
     async function md5(string2) {
@@ -13072,12 +13072,12 @@ var init_session = __esm({
     init_tracing();
     init_db();
     PgPreparedQuery = class {
-      constructor(query, cache2, queryMetadata, cacheConfig) {
+      constructor(query, cache3, queryMetadata, cacheConfig) {
         this.query = query;
-        this.cache = cache2;
+        this.cache = cache3;
         this.queryMetadata = queryMetadata;
         this.cacheConfig = cacheConfig;
-        if (cache2 && cache2.strategy() === "all" && cacheConfig === void 0) {
+        if (cache3 && cache3.strategy() === "all" && cacheConfig === void 0) {
           this.cacheConfig = { enable: true, autoInvalidate: true };
         }
         if (!this.cacheConfig?.enable) {
@@ -13287,8 +13287,8 @@ var init_session2 = __esm({
     init_utils();
     ({ Pool: Pool2, types: types2 } = esm_default);
     NodePgPreparedQuery = class extends PgPreparedQuery {
-      constructor(client, queryString, params, logger2, cache2, queryMetadata, cacheConfig, fields, name, _isResponseInArrayMode, customResultMapper) {
-        super({ sql: queryString, params }, cache2, queryMetadata, cacheConfig);
+      constructor(client, queryString, params, logger2, cache3, queryMetadata, cacheConfig, fields, name, _isResponseInArrayMode, customResultMapper) {
+        super({ sql: queryString, params }, cache3, queryMetadata, cacheConfig);
         this.client = client;
         this.queryString = queryString;
         this.params = params;
@@ -14038,6 +14038,11 @@ var init_auth = __esm({
         () => organizationsTable.id
       ),
       role: userRoleEnum("role").notNull().default("viewer"),
+      /**
+       * Platform-level super admin (MogulForge operator): may list and manage
+       * ALL organizations. Distinct from org "owner", which is scoped to one org.
+       */
+      isPlatformAdmin: boolean("is_platform_admin").notNull().default(false),
       isActive: boolean("is_active").notNull().default(true),
       createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
       updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => /* @__PURE__ */ new Date())
@@ -14152,6 +14157,21 @@ var init_leads = __esm({
         scoreReasons: jsonb("score_reasons").$type().notNull().default([]),
         summary: text("summary"),
         estimatedValueCents: integer("estimated_value_cents"),
+        /** Why the lead was lost (free text chosen by the rep; reported in ROI). */
+        lostReason: text("lost_reason"),
+        /** When the lead was first marked won (set once by the won hook). */
+        wonAt: timestamp("won_at", { withTimezone: true }),
+        /**
+         * Revenue captured when the lead was won: the accepted estimate total
+         * when one exists, otherwise the rep's estimated value. Never invented.
+         */
+        wonRevenueCents: integer("won_revenue_cents"),
+        /**
+         * Honest revenue-attribution category assigned at win time:
+         * directly_attributed | assisted | self_reported | estimated | unknown.
+         * Revenue is never claimed without one of these labels.
+         */
+        wonAttribution: text("won_attribution"),
         firstTouch: jsonb("first_touch").$type(),
         lastTouch: jsonb("last_touch").$type(),
         /** Most recent marketing source (source keeps the ORIGINAL source). */
@@ -14187,6 +14207,43 @@ var init_leads = __esm({
       createdAt: true,
       updatedAt: true
     });
+  }
+});
+
+// ../../lib/db/src/schema/engagement-links.ts
+var engagementLinksTable;
+var init_engagement_links = __esm({
+  "../../lib/db/src/schema/engagement-links.ts"() {
+    "use strict";
+    init_pg_core();
+    init_contacts();
+    init_leads();
+    init_organizations();
+    engagementLinksTable = pgTable(
+      "engagement_links",
+      {
+        id: uuid("id").defaultRandom().primaryKey(),
+        organizationId: uuid("organization_id").notNull().references(() => organizationsTable.id),
+        contactId: uuid("contact_id").notNull().references(() => contactsTable.id),
+        leadId: uuid("lead_id").references(() => leadsTable.id),
+        /** review | referral */
+        kind: text("kind").notNull(),
+        token: text("token").notNull(),
+        clickCount: integer("click_count").notNull().default(0),
+        lastClickedAt: timestamp("last_clicked_at", { withTimezone: true }),
+        /** Referral links: how many submissions came through this link. */
+        submissionCount: integer("submission_count").notNull().default(0),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+      },
+      (table) => [
+        uniqueIndex("engagement_links_token_idx").on(table.token),
+        uniqueIndex("engagement_links_contact_kind_idx").on(
+          table.contactId,
+          table.kind
+        ),
+        index("engagement_links_org_idx").on(table.organizationId)
+      ]
+    );
   }
 });
 
@@ -14587,7 +14644,7 @@ var init_audit = __esm({
 });
 
 // ../../lib/db/src/schema/settings.ts
-var DEFAULT_WIDGET_SETTINGS, DEFAULT_CONCIERGE_INTENTS, DEFAULT_CONCIERGE_SETTINGS, DEFAULT_LEAD_SCORING, DEFAULT_INSPECTION_AVAILABILITY, DEFAULT_APPOINTMENT_REMINDER, DEFAULT_SENDING_HOURS, orgSettingsTable, insertOrgSettingsSchema;
+var DEFAULT_WIDGET_SETTINGS, DEFAULT_CONCIERGE_INTENTS, DEFAULT_CONCIERGE_SETTINGS, DEFAULT_LEAD_SCORING, DEFAULT_INSPECTION_AVAILABILITY, DEFAULT_APPOINTMENT_REMINDER, DEFAULT_SENDING_HOURS, GENERIC_CONCIERGE_INTENTS, GENERIC_CONCIERGE_SETTINGS, GENERIC_APPOINTMENT_REMINDER, GENERIC_LEAD_SCORING, orgSettingsTable, insertOrgSettingsSchema, DEFAULT_PLAYBOOK_STAGE_BEHAVIORS, STAGE_BEHAVIOR_ACTIONS;
 var init_settings = __esm({
   "../../lib/db/src/schema/settings.ts"() {
     "use strict";
@@ -14685,6 +14742,46 @@ var init_settings = __esm({
       days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
       maxTouchesPerDay: 0
     };
+    GENERIC_CONCIERGE_INTENTS = [
+      { key: "urgent", label: "Urgent issue", service: "general", points: 30, reason: "Urgent issue reported", urgency: "high", triage: true, keywords: ["urgent", "emergency", "asap", "right away"] },
+      { key: "quote", label: "Request a quote", service: "general", points: 20, reason: "Quote requested", urgency: "normal", triage: false, keywords: ["quote", "estimate", "price", "cost", "how much"] },
+      { key: "appointment", label: "Book an appointment", service: "general", points: 15, reason: "Appointment requested", urgency: "normal", triage: false, keywords: ["appointment", "schedule", "book", "visit", "come out"] },
+      { key: "question", label: "General question", service: "general", points: 5, reason: "General inquiry", urgency: "normal", triage: false, keywords: ["question", "info", "information", "help"] }
+    ];
+    GENERIC_CONCIERGE_SETTINGS = {
+      assistantName: "AI Assistant",
+      greeting: "Hi! I'm the team's AI assistant. Tell me what you need and I'll get you to the right person \u2014 usually in about a minute.",
+      intents: GENERIC_CONCIERGE_INTENTS,
+      intakeDisclaimer: "Just so you know \u2014 I can't make pricing or professional determinations in chat. I'll collect the details so the team can follow up with real answers.",
+      emergencySafety: "\u26A0\uFE0F If this is a life-threatening emergency, please call 911 first. If anything at the property looks unsafe, keep your distance until a professional arrives.",
+      emergencyEscalation: "I'm flagging this as urgent \u2014 the team treats these as top priority. Give me about 60 seconds of questions and I'll get a priority callback set up.",
+      unknownAnswerFallback: "Good question \u2014 I don't have that in my notes, so I won't guess. I'll flag it for the team so a real person follows up with the answer.",
+      wrapUpNote: "The team will confirm the details with you directly \u2014 nothing in this chat is a final price or professional determination."
+    };
+    GENERIC_APPOINTMENT_REMINDER = {
+      leadTimeHours: 24,
+      smsBody: "{{business.name}} reminder: your appointment is coming up, {{appointment.window}}. {{reschedule.line}}",
+      emailSubject: "Reminder: your appointment \u2014 {{appointment.window}}",
+      emailBody: [
+        "Hi {{contact.firstName}},",
+        "",
+        "A quick reminder that your appointment with {{business.name}} is coming up:",
+        "\u{1F5D3} When: {{appointment.window}}",
+        "",
+        "{{reschedule.line}}",
+        "",
+        "\u2014 {{business.name}}"
+      ].join("\n")
+    };
+    GENERIC_LEAD_SCORING = {
+      ...DEFAULT_LEAD_SCORING,
+      intentPoints: {
+        urgent: 30,
+        quote: 20,
+        appointment: 15,
+        general: 10
+      }
+    };
     orgSettingsTable = pgTable(
       "org_settings",
       {
@@ -14710,11 +14807,15 @@ var init_settings = __esm({
         concierge: jsonb("concierge").$type(),
         /** Quiet hours + frequency caps for automated outreach. */
         sendingHours: jsonb("sending_hours").$type(),
+        /** Per-stage behavior for live acquisition playbook enrollments. */
+        playbookStageBehaviors: jsonb("playbook_stage_behaviors").$type(),
         // Brute-force security alerts recorded at or before this instant have been
         // acknowledged by an admin and should no longer render as an active banner.
         securityAlertsAcknowledgedAt: timestamp("security_alerts_acknowledged_at", {
           withTimezone: true
         }),
+        /** Guided onboarding wizard progress (resumable, per-org). */
+        onboarding: jsonb("onboarding").$type(),
         createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
         updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => /* @__PURE__ */ new Date())
       },
@@ -14725,6 +14826,32 @@ var init_settings = __esm({
       createdAt: true,
       updatedAt: true
     });
+    DEFAULT_PLAYBOOK_STAGE_BEHAVIORS = {
+      new: { action: "continue" },
+      ai_qualified: { action: "continue" },
+      contact_attempted: { action: "continue" },
+      follow_up: { action: "continue" },
+      nurture: { action: "continue" },
+      inspection_scheduled: { action: "complete" },
+      inspection_completed: { action: "complete" },
+      estimate_preparing: { action: "complete" },
+      estimate_sent: { action: "complete" },
+      claim_pending: { action: "complete" },
+      won: { action: "complete" },
+      production_scheduled: { action: "complete" },
+      in_progress: { action: "complete" },
+      final_walkthrough: { action: "complete" },
+      completed: { action: "complete" },
+      review_requested: { action: "complete" },
+      lost: { action: "complete" }
+    };
+    STAGE_BEHAVIOR_ACTIONS = [
+      "continue",
+      "pause",
+      "complete",
+      "cancel",
+      "enroll"
+    ];
   }
 });
 
@@ -14883,7 +15010,7 @@ var init_next_actions = __esm({
 });
 
 // ../../lib/db/src/schema/playbooks.ts
-var playbooksTable, playbookEnrollmentsTable, insertPlaybookSchema;
+var PLAYBOOK_CATEGORIES, playbooksTable, playbookEnrollmentsTable, insertPlaybookSchema;
 var init_playbooks = __esm({
   "../../lib/db/src/schema/playbooks.ts"() {
     "use strict";
@@ -14892,12 +15019,21 @@ var init_playbooks = __esm({
     init_drizzle_zod();
     init_leads();
     init_organizations();
+    PLAYBOOK_CATEGORIES = [
+      "acquisition",
+      "estimate_follow_up",
+      "reactivation",
+      "review_request",
+      "referral"
+    ];
     playbooksTable = pgTable(
       "playbooks",
       {
         id: uuid("id").defaultRandom().primaryKey(),
         organizationId: uuid("organization_id").notNull().references(() => organizationsTable.id),
         name: text("name").notNull(),
+        /** What kind of sequence this is; drives per-lead concurrency. */
+        category: text("category").$type().notNull().default("acquisition"),
         /**
          * Immutable identifier for system-seeded playbooks (e.g.
          * "default.new_lead_outreach"). Null for admin-created playbooks.
@@ -14905,6 +15041,13 @@ var init_playbooks = __esm({
          * deactivated seeded playbook is never re-seeded.
          */
         seedKey: text("seed_key"),
+        /**
+         * "outreach" (default): pre-sale sequences auto-enrolled on lead
+         * creation. "post_sale": milestone-gated sequences (review/referral/
+         * maintenance) enrolled only when the lead reaches a configured
+         * milestone status.
+         */
+        kind: text("kind").notNull().default("outreach"),
         isActive: boolean("is_active").notNull().default(true),
         enrollmentRules: jsonb("enrollment_rules").$type().notNull().default({}),
         steps: jsonb("steps").$type().notNull().default([]),
@@ -14923,6 +15066,10 @@ var init_playbooks = __esm({
         organizationId: uuid("organization_id").notNull().references(() => organizationsTable.id),
         playbookId: uuid("playbook_id").notNull().references(() => playbooksTable.id),
         leadId: uuid("lead_id").notNull().references(() => leadsTable.id),
+        /** Denormalized copy of the playbook's kind (drives uniqueness rules). */
+        kind: text("kind").notNull().default("outreach"),
+        /** Denormalized playbook category at enrollment time (concurrency key). */
+        category: text("category").$type().notNull().default("acquisition"),
         /** active | paused | completed | stopped */
         status: text("status").notNull().default("active"),
         /** Index of the NEXT step to send (0-based). */
@@ -14940,8 +15087,14 @@ var init_playbooks = __esm({
           table.organizationId,
           table.leadId
         ),
-        // At most one non-terminal enrollment per lead.
-        uniqueIndex("playbook_enrollments_lead_active_idx").on(table.leadId).where(sql`${table.status} in ('active', 'paused')`)
+        // At most one non-terminal OUTREACH-kind enrollment per lead PER
+        // category, so differently-categorized sequences may run concurrently.
+        uniqueIndex("playbook_enrollments_lead_active_idx").on(table.leadId, table.category).where(
+          sql`${table.status} in ('active', 'paused') and ${table.kind} = 'outreach'`
+        ),
+        // Post-sale playbooks may run alongside each other (review + referral +
+        // maintenance), but never twice for the same lead + playbook.
+        uniqueIndex("playbook_enrollments_lead_playbook_active_idx").on(table.leadId, table.playbookId).where(sql`${table.status} in ('active', 'paused')`)
       ]
     );
     insertPlaybookSchema = createInsertSchema(playbooksTable).omit({
@@ -15636,22 +15789,114 @@ var init_assistant_history = __esm({
   }
 });
 
+// ../../lib/db/src/schema/capture.ts
+var CAPTURE_TARGET_FIELDS, captureEndpointsTable, captureDeliveriesTable, apiIdempotencyKeysTable;
+var init_capture = __esm({
+  "../../lib/db/src/schema/capture.ts"() {
+    "use strict";
+    init_pg_core();
+    init_drizzle_orm();
+    init_leads();
+    init_organizations();
+    CAPTURE_TARGET_FIELDS = [
+      "firstName",
+      "lastName",
+      "fullName",
+      "email",
+      "phone",
+      "addressLine1",
+      "city",
+      "state",
+      "postalCode",
+      "message",
+      "source",
+      "campaign",
+      "externalId"
+    ];
+    captureEndpointsTable = pgTable(
+      "capture_endpoints",
+      {
+        id: uuid("id").defaultRandom().primaryKey(),
+        organizationId: uuid("organization_id").notNull().references(() => organizationsTable.id),
+        name: text("name").notNull(),
+        /** Public URL token (`cap_...`). Identifies org + endpoint on the public route. */
+        token: text("token").notNull(),
+        mapping: jsonb("mapping").$type().notNull().default(sql`'{}'::jsonb`),
+        /** Attribution source recorded on captured leads (e.g. "website-form"). */
+        defaultSource: text("default_source").notNull().default("external-form"),
+        isActive: boolean("is_active").notNull().default(true),
+        lastReceivedAt: timestamp("last_received_at", { withTimezone: true }),
+        receivedCount: integer("received_count").notNull().default(0),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+      },
+      (t) => [
+        uniqueIndex("capture_endpoints_token_uq").on(t.token),
+        index("capture_endpoints_org_idx").on(t.organizationId)
+      ]
+    );
+    captureDeliveriesTable = pgTable(
+      "capture_deliveries",
+      {
+        id: uuid("id").defaultRandom().primaryKey(),
+        organizationId: uuid("organization_id").notNull().references(() => organizationsTable.id),
+        endpointId: uuid("endpoint_id").notNull().references(() => captureEndpointsTable.id),
+        /** Caller-supplied idempotency key; null for non-idempotent posts. */
+        idempotencyKey: text("idempotency_key"),
+        leadId: uuid("lead_id").references(() => leadsTable.id),
+        /** "created" | "merged" (deduped into an existing lead) | "rejected" */
+        outcome: text("outcome").notNull(),
+        detail: text("detail"),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+      },
+      (t) => [
+        uniqueIndex("capture_deliveries_idem_uq").on(t.endpointId, t.idempotencyKey).where(sql`${t.idempotencyKey} is not null`),
+        index("capture_deliveries_org_idx").on(t.organizationId, t.createdAt)
+      ]
+    );
+    apiIdempotencyKeysTable = pgTable(
+      "api_idempotency_keys",
+      {
+        id: uuid("id").defaultRandom().primaryKey(),
+        organizationId: uuid("organization_id").notNull().references(() => organizationsTable.id),
+        /** Route scope, e.g. "leads.create", so keys never collide across endpoints. */
+        scope: text("scope").notNull(),
+        key: text("key").notNull(),
+        responseStatus: integer("response_status").notNull(),
+        responseBody: jsonb("response_body").$type().notNull(),
+        createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+      },
+      (t) => [
+        uniqueIndex("api_idempotency_org_scope_key_uq").on(t.organizationId, t.scope, t.key)
+      ]
+    );
+  }
+});
+
 // ../../lib/db/src/schema/index.ts
 var schema_exports = {};
 __export(schema_exports, {
+  CAPTURE_TARGET_FIELDS: () => CAPTURE_TARGET_FIELDS,
   DEFAULT_APPOINTMENT_REMINDER: () => DEFAULT_APPOINTMENT_REMINDER,
   DEFAULT_CONCIERGE_INTENTS: () => DEFAULT_CONCIERGE_INTENTS,
   DEFAULT_CONCIERGE_SETTINGS: () => DEFAULT_CONCIERGE_SETTINGS,
   DEFAULT_INSPECTION_AVAILABILITY: () => DEFAULT_INSPECTION_AVAILABILITY,
   DEFAULT_LEAD_SCORING: () => DEFAULT_LEAD_SCORING,
+  DEFAULT_PLAYBOOK_STAGE_BEHAVIORS: () => DEFAULT_PLAYBOOK_STAGE_BEHAVIORS,
   DEFAULT_SENDING_HOURS: () => DEFAULT_SENDING_HOURS,
   DEFAULT_WIDGET_SETTINGS: () => DEFAULT_WIDGET_SETTINGS,
   FORM_FIELD_MAPPINGS: () => FORM_FIELD_MAPPINGS,
   FORM_FIELD_TYPES: () => FORM_FIELD_TYPES,
+  GENERIC_APPOINTMENT_REMINDER: () => GENERIC_APPOINTMENT_REMINDER,
+  GENERIC_CONCIERGE_INTENTS: () => GENERIC_CONCIERGE_INTENTS,
+  GENERIC_CONCIERGE_SETTINGS: () => GENERIC_CONCIERGE_SETTINGS,
+  GENERIC_LEAD_SCORING: () => GENERIC_LEAD_SCORING,
   KNOWLEDGE_CATEGORIES: () => KNOWLEDGE_CATEGORIES,
+  PLAYBOOK_CATEGORIES: () => PLAYBOOK_CATEGORIES,
+  STAGE_BEHAVIOR_ACTIONS: () => STAGE_BEHAVIOR_ACTIONS,
   SUPPRESSION_REASONS: () => SUPPRESSION_REASONS,
   activitiesTable: () => activitiesTable,
   analyticsEventsTable: () => analyticsEventsTable,
+  apiIdempotencyKeysTable: () => apiIdempotencyKeysTable,
   apiKeysTable: () => apiKeysTable,
   appointmentStatusEnum: () => appointmentStatusEnum,
   appointmentTypeEnum: () => appointmentTypeEnum,
@@ -15662,6 +15907,8 @@ __export(schema_exports, {
   automationRunStatusEnum: () => automationRunStatusEnum,
   automationRunsTable: () => automationRunsTable,
   automationsTable: () => automationsTable,
+  captureDeliveriesTable: () => captureDeliveriesTable,
+  captureEndpointsTable: () => captureEndpointsTable,
   consentChannelEnum: () => consentChannelEnum,
   consentRecordsTable: () => consentRecordsTable,
   contactsTable: () => contactsTable,
@@ -15670,6 +15917,7 @@ __export(schema_exports, {
   conversationStatusEnum: () => conversationStatusEnum,
   conversationsTable: () => conversationsTable,
   crmTasksTable: () => crmTasksTable,
+  engagementLinksTable: () => engagementLinksTable,
   estimateStatusEnum: () => estimateStatusEnum,
   estimatesTable: () => estimatesTable,
   formSubmissionsTable: () => formSubmissionsTable,
@@ -15744,6 +15992,7 @@ var init_schema2 = __esm({
     init_contacts();
     init_properties();
     init_leads();
+    init_engagement_links();
     init_estimates();
     init_projects();
     init_crm_tasks();
@@ -15771,6 +16020,7 @@ var init_schema2 = __esm({
     init_portal();
     init_rate_limits();
     init_assistant_history();
+    init_capture();
   }
 });
 
@@ -36567,27 +36817,27 @@ var require_router = __commonJS({
     var slice = Array.prototype.slice;
     var flatten = Array.prototype.flat;
     var methods = METHODS.map((method) => method.toLowerCase());
-    module.exports = Router30;
+    module.exports = Router34;
     module.exports.Route = Route;
-    function Router30(options) {
-      if (!(this instanceof Router30)) {
-        return new Router30(options);
+    function Router34(options) {
+      if (!(this instanceof Router34)) {
+        return new Router34(options);
       }
       const opts = options || {};
-      function router30(req, res, next) {
-        router30.handle(req, res, next);
+      function router34(req, res, next) {
+        router34.handle(req, res, next);
       }
-      Object.setPrototypeOf(router30, this);
-      router30.caseSensitive = opts.caseSensitive;
-      router30.mergeParams = opts.mergeParams;
-      router30.params = {};
-      router30.strict = opts.strict;
-      router30.stack = [];
-      return router30;
+      Object.setPrototypeOf(router34, this);
+      router34.caseSensitive = opts.caseSensitive;
+      router34.mergeParams = opts.mergeParams;
+      router34.params = {};
+      router34.strict = opts.strict;
+      router34.stack = [];
+      return router34;
     }
-    Router30.prototype = function() {
+    Router34.prototype = function() {
     };
-    Router30.prototype.param = function param(name, fn) {
+    Router34.prototype.param = function param(name, fn) {
       if (!name) {
         throw new TypeError("argument name is required");
       }
@@ -36607,7 +36857,7 @@ var require_router = __commonJS({
       params.push(fn);
       return this;
     };
-    Router30.prototype.handle = function handle(req, res, callback) {
+    Router34.prototype.handle = function handle(req, res, callback) {
       if (!callback) {
         throw new TypeError("argument callback is required");
       }
@@ -36734,7 +36984,7 @@ var require_router = __commonJS({
         }
       }
     };
-    Router30.prototype.use = function use(handler) {
+    Router34.prototype.use = function use(handler) {
       let offset = 0;
       let path2 = "/";
       if (typeof handler !== "function") {
@@ -36767,7 +37017,7 @@ var require_router = __commonJS({
       }
       return this;
     };
-    Router30.prototype.route = function route(path2) {
+    Router34.prototype.route = function route(path2) {
       const route2 = new Route(path2);
       const layer = new Layer(path2, {
         sensitive: this.caseSensitive,
@@ -36782,7 +37032,7 @@ var require_router = __commonJS({
       return route2;
     };
     methods.concat("all").forEach(function(method) {
-      Router30.prototype[method] = function(path2) {
+      Router34.prototype[method] = function(path2) {
         const route = this.route(path2);
         route[method].apply(route, slice.call(arguments, 1));
         return this;
@@ -36965,13 +37215,13 @@ var require_application = __commonJS({
     var compileTrust = require_utils5().compileTrust;
     var resolve = __require("node:path").resolve;
     var once = require_once();
-    var Router30 = require_router();
+    var Router34 = require_router();
     var slice = Array.prototype.slice;
     var flatten = Array.prototype.flat;
     var app2 = exports = module.exports = {};
     var trustProxyDefaultSymbol = "@@symbol:trust_proxy_default";
     app2.init = function init() {
-      var router30 = null;
+      var router34 = null;
       this.cache = /* @__PURE__ */ Object.create(null);
       this.engines = /* @__PURE__ */ Object.create(null);
       this.settings = /* @__PURE__ */ Object.create(null);
@@ -36980,13 +37230,13 @@ var require_application = __commonJS({
         configurable: true,
         enumerable: true,
         get: function getrouter() {
-          if (router30 === null) {
-            router30 = new Router30({
+          if (router34 === null) {
+            router34 = new Router34({
               caseSensitive: this.enabled("case sensitive routing"),
               strict: this.enabled("strict routing")
             });
           }
-          return router30;
+          return router34;
         }
       });
     };
@@ -37057,15 +37307,15 @@ var require_application = __commonJS({
       if (fns.length === 0) {
         throw new TypeError("app.use() requires a middleware function");
       }
-      var router30 = this.router;
+      var router34 = this.router;
       fns.forEach(function(fn2) {
         if (!fn2 || !fn2.handle || !fn2.set) {
-          return router30.use(path2, fn2);
+          return router34.use(path2, fn2);
         }
         debug(".use app under %s", path2);
         fn2.mountpath = path2;
         fn2.parent = this;
-        router30.use(path2, function mounted_app(req, res, next) {
+        router34.use(path2, function mounted_app(req, res, next) {
           var orig = req.app;
           fn2.handle(req, res, function(err) {
             Object.setPrototypeOf(req, orig.request);
@@ -37155,7 +37405,7 @@ var require_application = __commonJS({
       return this;
     };
     app2.render = function render(name, options, callback) {
-      var cache2 = this.cache;
+      var cache3 = this.cache;
       var done = callback;
       var engines = this.engines;
       var opts = options;
@@ -37169,7 +37419,7 @@ var require_application = __commonJS({
         renderOptions.cache = this.enabled("view cache");
       }
       if (renderOptions.cache) {
-        view = cache2[name];
+        view = cache3[name];
       }
       if (!view) {
         var View3 = this.get("view");
@@ -37185,7 +37435,7 @@ var require_application = __commonJS({
           return done(err);
         }
         if (renderOptions.cache) {
-          cache2[name] = view;
+          cache3[name] = view;
         }
       }
       tryRender(view, renderOptions, done);
@@ -39650,7 +39900,7 @@ var require_express = __commonJS({
     var EventEmitter = __require("node:events").EventEmitter;
     var mixin = require_merge_descriptors();
     var proto = require_application();
-    var Router30 = require_router();
+    var Router34 = require_router();
     var req = require_request();
     var res = require_response();
     exports = module.exports = createApplication;
@@ -39672,8 +39922,8 @@ var require_express = __commonJS({
     exports.application = proto;
     exports.request = req;
     exports.response = res;
-    exports.Route = Router30.Route;
-    exports.Router = Router30;
+    exports.Route = Router34.Route;
+    exports.Router = Router34;
     exports.json = bodyParser.json;
     exports.raw = bodyParser.raw;
     exports.static = require_serve_static();
@@ -43026,12 +43276,12 @@ var require_levels = __commonJS({
     function genLsCache(instance) {
       const formatter = instance[formattersSym].level;
       const { labels } = instance.levels;
-      const cache2 = {};
+      const cache3 = {};
       for (const label in labels) {
         const level = formatter(labels[label], Number(label));
-        cache2[label] = JSON.stringify(level).slice(0, -1);
+        cache3[label] = JSON.stringify(level).slice(0, -1);
       }
-      instance[lsCacheSym] = cache2;
+      instance[lsCacheSym] = cache3;
       return instance;
     }
     function isStandardLevel(level, useOnlyCustomLevels) {
@@ -44644,6 +44894,24 @@ var require_logger = __commonJS({
   }
 });
 
+// src/services/audit.ts
+async function recordAudit(params) {
+  await db.insert(auditEventsTable).values({
+    organizationId: params.organizationId,
+    actorUserId: params.actorUserId ?? null,
+    action: params.action,
+    entityType: params.entityType,
+    entityId: params.entityId ?? null,
+    metadata: params.metadata ?? {}
+  });
+}
+var init_audit2 = __esm({
+  "src/services/audit.ts"() {
+    "use strict";
+    init_src();
+  }
+});
+
 // src/lib/client.config.ts
 var CLIENT;
 var init_client_config = __esm({
@@ -44687,21 +44955,225 @@ var init_client_config = __esm({
   }
 });
 
-// src/services/audit.ts
-async function recordAudit(params) {
-  await db.insert(auditEventsTable).values({
-    organizationId: params.organizationId,
-    actorUserId: params.actorUserId ?? null,
-    action: params.action,
-    entityType: params.entityType,
-    entityId: params.entityId ?? null,
-    metadata: params.metadata ?? {}
-  });
+// src/lib/orgFlavor.ts
+async function isLegacyDefaultOrg(organizationId) {
+  const cached = cache.get(organizationId);
+  if (cached !== void 0) return cached;
+  const [org] = await db.select({ slug: organizationsTable.slug }).from(organizationsTable).where(eq(organizationsTable.id, organizationId));
+  const isLegacy = org?.slug === CLIENT.defaultOrgSlug;
+  cache.set(organizationId, isLegacy);
+  return isLegacy;
 }
-var init_audit2 = __esm({
-  "src/services/audit.ts"() {
+var cache;
+var init_orgFlavor = __esm({
+  "src/lib/orgFlavor.ts"() {
     "use strict";
     init_src();
+    init_drizzle_orm();
+    init_client_config();
+    cache = /* @__PURE__ */ new Map();
+  }
+});
+
+// src/services/attribution.ts
+function buildTouch(params) {
+  const a = params.attribution ?? {};
+  const utm = {};
+  const map = [
+    ["utmSource", "source"],
+    ["utmMedium", "medium"],
+    ["utmCampaign", "campaign"],
+    ["utmTerm", "term"],
+    ["utmContent", "content"]
+  ];
+  for (const [key, short] of map) {
+    const v = clean(a[key], 200);
+    if (v) utm[short] = v;
+  }
+  return {
+    channel: params.channel,
+    source: params.source,
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    ...clean(a.landingPage) ? { landingPage: clean(a.landingPage) } : {},
+    ...clean(a.referrer) ? { referrer: clean(a.referrer) } : {},
+    ...Object.keys(utm).length ? { utm } : {}
+  };
+}
+function leadAttributionColumns(params) {
+  const { touch } = params;
+  return {
+    source: params.source,
+    latestSource: params.source,
+    campaign: touch.utm?.campaign ?? null,
+    landingPage: touch.landingPage ?? null,
+    referrer: touch.referrer ?? null,
+    creationMethod: params.creationMethod,
+    anonymousId: clean(params.anonymousId, 100) ?? null,
+    firstTouch: touch,
+    lastTouch: touch
+  };
+}
+function repeatTouchColumns(params) {
+  return {
+    latestSource: params.source,
+    lastTouch: params.touch,
+    ...params.touch.utm?.campaign && !params.existing.campaign ? { campaign: params.touch.utm.campaign } : {},
+    ...!params.existing.anonymousId && clean(params.anonymousId, 100) ? { anonymousId: clean(params.anonymousId, 100) } : {}
+  };
+}
+async function getVisitorBehavior(organizationId, anonymousId) {
+  const anon = clean(anonymousId, 100);
+  if (!anon) return EMPTY_BEHAVIOR;
+  const since = new Date(Date.now() - 90 * 24 * 60 * 6e4);
+  const events = await db.select({
+    eventName: analyticsEventsTable.eventName,
+    sessionId: analyticsEventsTable.sessionId,
+    path: analyticsEventsTable.path,
+    properties: analyticsEventsTable.properties,
+    occurredAt: analyticsEventsTable.occurredAt
+  }).from(analyticsEventsTable).where(
+    and(
+      eq(analyticsEventsTable.organizationId, organizationId),
+      eq(analyticsEventsTable.anonymousId, anon),
+      gte(analyticsEventsTable.occurredAt, since)
+    )
+  ).orderBy(asc(analyticsEventsTable.occurredAt)).limit(2e3);
+  if (events.length === 0) return EMPTY_BEHAVIOR;
+  const sessions = /* @__PURE__ */ new Set();
+  const days = /* @__PURE__ */ new Set();
+  const pathViews = /* @__PURE__ */ new Map();
+  const highIntent = /* @__PURE__ */ new Set();
+  const tools = /* @__PURE__ */ new Set();
+  let pageViews = 0;
+  let formStarts = 0;
+  let formSubmits = 0;
+  for (const e2 of events) {
+    if (e2.sessionId) sessions.add(e2.sessionId);
+    days.add(e2.occurredAt.toISOString().slice(0, 10));
+    if (e2.eventName === "page_view") {
+      pageViews++;
+      const path2 = e2.path ?? "/";
+      pathViews.set(path2, (pathViews.get(path2) ?? 0) + 1);
+      for (const { pattern, label } of HIGH_INTENT_PATTERNS) {
+        if (pattern.test(path2)) highIntent.add(label);
+      }
+    }
+    if (TOOL_EVENTS.has(e2.eventName)) {
+      tools.add(e2.eventName.replace(/_started$|_opened$/, ""));
+    }
+    if (e2.eventName === "form_started" || e2.eventName === "assessment_started") formStarts++;
+    if (e2.eventName === "form_submitted" || e2.eventName === "assessment_submitted") formSubmits++;
+  }
+  const firstSeen = events[0].occurredAt;
+  const lastSeen = events[events.length - 1].occurredAt;
+  const topPages = [...pathViews.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([path2, views]) => ({ path: path2, views }));
+  const abandonedForms = Math.max(0, formStarts - formSubmits);
+  const spanDays = Math.max(
+    1,
+    Math.round((lastSeen.getTime() - firstSeen.getTime()) / 864e5)
+  );
+  const highlights = [];
+  if (days.size > 1) highlights.push(`Returned ${days.size}\xD7 over ${spanDays} day${spanDays === 1 ? "" : "s"}`);
+  if (highIntent.size > 0) highlights.push(`Viewed ${[...highIntent].join(", ")} page${highIntent.size === 1 ? "" : "s"}`);
+  if (tools.size > 0) highlights.push(`Started ${[...tools].join(", ")}`);
+  if (abandonedForms > 0) highlights.push(`Abandoned ${abandonedForms} form${abandonedForms === 1 ? "" : "s"} before converting`);
+  if (pageViews > 0) highlights.push(`${pageViews} page view${pageViews === 1 ? "" : "s"} across ${sessions.size || 1} visit${sessions.size === 1 ? "" : "s"}`);
+  return {
+    pageViews,
+    sessions: sessions.size,
+    activeDays: days.size,
+    firstSeenAt: firstSeen.toISOString(),
+    lastSeenAt: lastSeen.toISOString(),
+    topPages,
+    highIntentPages: [...highIntent],
+    toolsStarted: [...tools],
+    abandonedForms,
+    highlights
+  };
+}
+function scoreBehavior(behavior, weights) {
+  let points = 0;
+  const reasons = [];
+  if (behavior.activeDays >= 2 && weights.returnVisitBonus > 0) {
+    points += weights.returnVisitBonus;
+    reasons.push(`Returned to the website on ${behavior.activeDays} separate days`);
+  }
+  if (behavior.highIntentPages.length > 0 && weights.engagedPagesBonus > 0) {
+    points += weights.engagedPagesBonus;
+    reasons.push(`Viewed high-intent pages (${behavior.highIntentPages.join(", ")})`);
+  }
+  if (behavior.toolsStarted.length > 0 && weights.toolUsageBonus > 0) {
+    points += weights.toolUsageBonus;
+    reasons.push(`Used on-site tools (${behavior.toolsStarted.join(", ")})`);
+  }
+  return { points, reasons };
+}
+async function behaviorSignals(organizationId, anonymousId, weights) {
+  const behavior = await getVisitorBehavior(organizationId, anonymousId);
+  const { points, reasons } = scoreBehavior(behavior, weights);
+  return { points, reasons, behavior };
+}
+async function getLeadBehaviorSummary(organizationId, leadId) {
+  const [lead] = await db.select({
+    anonymousId: leadsTable.anonymousId,
+    source: leadsTable.source,
+    latestSource: leadsTable.latestSource,
+    campaign: leadsTable.campaign,
+    landingPage: leadsTable.landingPage,
+    referrer: leadsTable.referrer,
+    creationMethod: leadsTable.creationMethod
+  }).from(leadsTable).where(and(eq(leadsTable.id, leadId), eq(leadsTable.organizationId, organizationId)));
+  if (!lead) return null;
+  const behavior = await getVisitorBehavior(organizationId, lead.anonymousId);
+  return {
+    linked: Boolean(lead.anonymousId),
+    attribution: {
+      source: lead.source,
+      latestSource: lead.latestSource,
+      campaign: lead.campaign,
+      landingPage: lead.landingPage,
+      referrer: lead.referrer,
+      creationMethod: lead.creationMethod
+    },
+    behavior
+  };
+}
+var clean, HIGH_INTENT_PATTERNS, TOOL_EVENTS, EMPTY_BEHAVIOR, clampScore;
+var init_attribution = __esm({
+  "src/services/attribution.ts"() {
+    "use strict";
+    init_src();
+    init_drizzle_orm();
+    clean = (v, max = 500) => {
+      if (typeof v !== "string") return void 0;
+      const t = v.trim().slice(0, max);
+      return t || void 0;
+    };
+    HIGH_INTENT_PATTERNS = [
+      { pattern: /financ/i, label: "financing" },
+      { pattern: /pricing|cost|estimate/i, label: "pricing" },
+      { pattern: /services|repair|replace/i, label: "services" },
+      { pattern: /reviews|testimonial/i, label: "reviews" }
+    ];
+    TOOL_EVENTS = /* @__PURE__ */ new Set([
+      "assessment_started",
+      "form_started",
+      "tool_started",
+      "concierge_opened"
+    ]);
+    EMPTY_BEHAVIOR = {
+      pageViews: 0,
+      sessions: 0,
+      activeDays: 0,
+      firstSeenAt: null,
+      lastSeenAt: null,
+      topPages: [],
+      highIntentPages: [],
+      toolsStarted: [],
+      abandonedForms: 0,
+      highlights: []
+    };
+    clampScore = (score) => Math.max(0, Math.min(Math.round(score), 100));
   }
 });
 
@@ -45076,14 +45548,14 @@ async function draftOutreachMessage(input) {
     try {
       const body = await openAiComplete(
         [
-          `You write ${input.channel === "sms" ? "SMS texts (max 2 short sentences, no links, no emojis)" : "short plain-text emails (max 6 short lines, no HTML)"} for ${input.businessName}, a roofing company, reaching out to a homeowner who requested help.`,
-          "Rules: never state pricing, never guarantee insurance approval, never conclude the roof is damaged \u2014 only offer help and a clear next step.",
-          "Address the homeowner by first name. Sign off with the business name.",
+          `You write ${input.channel === "sms" ? "SMS texts (max 2 short sentences, no links, no emojis)" : "short plain-text emails (max 6 short lines, no HTML)"} for ${input.businessName}, reaching out to a customer who requested help.`,
+          "Rules: never state pricing, never guarantee insurance approval, never make damage or safety determinations \u2014 only offer help and a clear next step.",
+          "Address the customer by first name. Sign off with the business name.",
           "Output ONLY the message body."
         ].join(" "),
         [
-          `Homeowner first name: ${input.contactFirstName}`,
-          `Their request: ${input.leadSummary ?? input.serviceType ?? "roofing help"}`,
+          `Customer first name: ${input.contactFirstName}`,
+          `Their request: ${input.leadSummary ?? input.serviceType ?? "your request"}`,
           `Urgency: ${input.urgency}`,
           `Touch ${input.stepNumber} of ${input.totalSteps}. Direction for this message: ${input.prompt}`
         ].join("\n")
@@ -45097,9 +45569,9 @@ async function draftOutreachMessage(input) {
     }
   }
   const greeting = `Hi ${input.contactFirstName},`;
-  const core = input.channel === "sms" ? `${input.businessName} here \u2014 we're ready to help with your ${input.serviceType ?? "roof"}. Reply to this text and we'll take care of the rest.` : `${greeting}
+  const core = input.channel === "sms" ? `${input.businessName} here \u2014 we're ready to help with your ${input.serviceType ?? "request"}. Reply to this text and we'll take care of the rest.` : `${greeting}
 
-Thanks for reaching out about your ${input.serviceType ?? "roof"} \u2014 our team is ready to help and your free inspection is easy to schedule. Just reply to this email and we'll set it up.
+Thanks for reaching out about your ${input.serviceType ?? "request"} \u2014 our team is ready to help and it's easy to schedule time with us. Just reply to this email and we'll set it up.
 
 \u2014 ${input.businessName}`;
   return { body: core, provider: "template-fallback" };
@@ -45153,7 +45625,7 @@ var init_providers = __esm({
     openAiProvider = {
       async summarizeLead(input) {
         const summary = await openAiComplete(
-          "Write a one-sentence internal CRM summary of this roofing lead. Do not speculate about damage, pricing, or insurance outcomes.",
+          "Write a one-sentence internal CRM summary of this inbound sales lead. Do not speculate about damage, pricing, or insurance outcomes.",
           `Intent: ${input.intent}
 Urgency: ${input.urgency}
 Homeowner notes: ${input.description ?? "none"}`
@@ -45163,8 +45635,8 @@ Homeowner notes: ${input.description ?? "none"}`
       async generateSalesSummary(input) {
         const summary = await openAiComplete(
           [
-            "You write concise internal sales summaries for a roofing company CRM from AI concierge chat intakes.",
-            "Rules: never guarantee insurance approval or claim payment, never state pricing, never conclude the roof is damaged or structurally safe/unsafe \u2014 only report what the homeowner said.",
+            "You write concise internal sales summaries for a company CRM from AI concierge chat intakes.",
+            "Rules: never guarantee insurance approval or claim payment, never state pricing, never conclude the property is damaged or structurally safe/unsafe \u2014 only report what the customer said.",
             "Always end with the recommended next step for the sales rep.",
             "Output 4-7 short lines."
           ].join(" "),
@@ -45255,7 +45727,7 @@ ${input.transcript.map((m) => `${m.role}: ${m.content}`).join("\n").slice(0, 6e3
       async send(to, subject, body) {
         const apiKey = process.env.RESEND_API_KEY;
         if (!apiKey) throw new Error("RESEND_API_KEY is not set");
-        const from = process.env.RESEND_FROM_EMAIL ?? "Painless Roofing <onboarding@resend.dev>";
+        const from = process.env.RESEND_FROM_EMAIL ?? "Leads <onboarding@resend.dev>";
         const res = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: {
@@ -45385,25 +45857,38 @@ async function getOrgSettings(organizationId) {
     const [updated] = await db.update(orgSettingsTable).set({ services: normalized }).where(eq(orgSettingsTable.id, existing.id)).returning();
     return updated ?? { ...existing, services: normalized };
   }
-  const [created] = await db.insert(orgSettingsTable).values({
-    organizationId,
-    businessProfile: {
-      businessName: "Painless Roofing & Water Restoration",
-      phone: "(404) 444-4476",
-      city: "Canton",
-      state: "GA",
-      postalCode: "30115",
-      hours: "24/7",
-      emergencyAvailability: true
-    },
-    services: DEFAULT_SERVICES,
-    serviceAreas: DEFAULT_SERVICE_AREAS
-  }).onConflictDoNothing().returning();
+  const legacy = await isLegacyDefaultOrg(organizationId);
+  const [org] = await db.select({ name: organizationsTable.name }).from(organizationsTable).where(eq(organizationsTable.id, organizationId));
+  const [created] = await db.insert(orgSettingsTable).values(
+    legacy ? {
+      organizationId,
+      businessProfile: {
+        businessName: "Painless Roofing & Water Restoration",
+        phone: "(404) 444-4476",
+        city: "Canton",
+        state: "GA",
+        postalCode: "30115",
+        hours: "24/7",
+        emergencyAvailability: true
+      },
+      services: DEFAULT_SERVICES,
+      serviceAreas: DEFAULT_SERVICE_AREAS
+    } : {
+      organizationId,
+      businessProfile: { businessName: org?.name ?? "" },
+      services: [],
+      serviceAreas: [],
+      leadScoring: GENERIC_LEAD_SCORING,
+      appointmentReminder: GENERIC_APPOINTMENT_REMINDER,
+      concierge: GENERIC_CONCIERGE_SETTINGS
+    }
+  ).onConflictDoNothing().returning();
   if (created) return created;
   const [row] = await db.select().from(orgSettingsTable).where(eq(orgSettingsTable.organizationId, organizationId));
   return row;
 }
 async function ensureDefaultServiceAreas(organizationId) {
+  if (!await isLegacyDefaultOrg(organizationId)) return;
   const settings = await getOrgSettings(organizationId);
   const updated = normalizeAreas(settings.serviceAreas ?? []);
   if (!updated) return;
@@ -45431,14 +45916,25 @@ async function getSendingHours(organizationId) {
   }
   return merged;
 }
+async function getPlaybookStageBehaviors(organizationId) {
+  const settings = await getOrgSettings(organizationId);
+  const raw = settings.playbookStageBehaviors ?? {};
+  const merged = { ...DEFAULT_PLAYBOOK_STAGE_BEHAVIORS };
+  for (const [stage, entry] of Object.entries(raw)) {
+    const sanitized = sanitizeStageBehavior(entry);
+    if (sanitized) merged[stage] = sanitized;
+  }
+  return merged;
+}
 async function getLeadScoring(organizationId) {
   const settings = await getOrgSettings(organizationId);
-  if (!settings.leadScoring) return DEFAULT_LEAD_SCORING;
+  const defaults2 = await isLegacyDefaultOrg(organizationId) ? DEFAULT_LEAD_SCORING : GENERIC_LEAD_SCORING;
+  if (!settings.leadScoring) return defaults2;
   return {
-    ...DEFAULT_LEAD_SCORING,
+    ...defaults2,
     ...settings.leadScoring,
     intentPoints: {
-      ...DEFAULT_LEAD_SCORING.intentPoints,
+      ...defaults2.intentPoints,
       ...settings.leadScoring.intentPoints
     }
   };
@@ -45473,23 +45969,22 @@ async function getInspectionAvailability(organizationId) {
 }
 async function getAppointmentReminderSettings(organizationId) {
   const settings = await getOrgSettings(organizationId);
+  const defaults2 = await isLegacyDefaultOrg(organizationId) ? DEFAULT_APPOINTMENT_REMINDER : GENERIC_APPOINTMENT_REMINDER;
   const raw = settings.appointmentReminder;
-  if (!raw) return DEFAULT_APPOINTMENT_REMINDER;
-  const merged = { ...DEFAULT_APPOINTMENT_REMINDER, ...raw };
-  const leadTimeHours = Number.isFinite(merged.leadTimeHours) ? Math.min(MAX_REMINDER_LEAD_HOURS, Math.max(1, merged.leadTimeHours)) : DEFAULT_APPOINTMENT_REMINDER.leadTimeHours;
+  if (!raw) return defaults2;
+  const merged = { ...defaults2, ...raw };
+  const leadTimeHours = Number.isFinite(merged.leadTimeHours) ? Math.min(MAX_REMINDER_LEAD_HOURS, Math.max(1, merged.leadTimeHours)) : defaults2.leadTimeHours;
   const nonEmpty = (value, fallback) => typeof value === "string" && value.trim().length > 0 ? value : fallback;
   return {
     leadTimeHours,
-    smsBody: nonEmpty(merged.smsBody, DEFAULT_APPOINTMENT_REMINDER.smsBody),
-    emailSubject: nonEmpty(
-      merged.emailSubject,
-      DEFAULT_APPOINTMENT_REMINDER.emailSubject
-    ),
-    emailBody: nonEmpty(merged.emailBody, DEFAULT_APPOINTMENT_REMINDER.emailBody)
+    smsBody: nonEmpty(merged.smsBody, defaults2.smsBody),
+    emailSubject: nonEmpty(merged.emailSubject, defaults2.emailSubject),
+    emailBody: nonEmpty(merged.emailBody, defaults2.emailBody)
   };
 }
 async function getConciergeSettings(organizationId) {
   const settings = await getOrgSettings(organizationId);
+  const DEFAULTS = await isLegacyDefaultOrg(organizationId) ? DEFAULT_CONCIERGE_SETTINGS : GENERIC_CONCIERGE_SETTINGS;
   const raw = settings.concierge ?? {};
   const nonEmpty = (value, fallback) => typeof value === "string" && value.trim().length > 0 ? value : fallback;
   const seen = /* @__PURE__ */ new Set();
@@ -45506,25 +46001,45 @@ async function getConciergeSettings(organizationId) {
     keywords: (Array.isArray(i.keywords) ? i.keywords : []).filter((k) => typeof k === "string" && k.trim().length > 0).map((k) => k.trim().toLowerCase())
   }));
   return {
-    assistantName: nonEmpty(raw.assistantName, DEFAULT_CONCIERGE_SETTINGS.assistantName),
-    greeting: nonEmpty(raw.greeting, DEFAULT_CONCIERGE_SETTINGS.greeting),
-    intents: intents.length > 0 ? intents : DEFAULT_CONCIERGE_SETTINGS.intents,
-    intakeDisclaimer: nonEmpty(raw.intakeDisclaimer, DEFAULT_CONCIERGE_SETTINGS.intakeDisclaimer),
-    emergencySafety: nonEmpty(raw.emergencySafety, DEFAULT_CONCIERGE_SETTINGS.emergencySafety),
+    assistantName: nonEmpty(raw.assistantName, DEFAULTS.assistantName),
+    greeting: nonEmpty(raw.greeting, DEFAULTS.greeting),
+    intents: intents.length > 0 ? intents : DEFAULTS.intents,
+    intakeDisclaimer: nonEmpty(raw.intakeDisclaimer, DEFAULTS.intakeDisclaimer),
+    emergencySafety: nonEmpty(raw.emergencySafety, DEFAULTS.emergencySafety),
     emergencyEscalation: nonEmpty(
       raw.emergencyEscalation,
-      DEFAULT_CONCIERGE_SETTINGS.emergencyEscalation
+      DEFAULTS.emergencyEscalation
     ),
     unknownAnswerFallback: nonEmpty(
       raw.unknownAnswerFallback,
-      DEFAULT_CONCIERGE_SETTINGS.unknownAnswerFallback
+      DEFAULTS.unknownAnswerFallback
     ),
-    wrapUpNote: nonEmpty(raw.wrapUpNote, DEFAULT_CONCIERGE_SETTINGS.wrapUpNote)
+    wrapUpNote: nonEmpty(raw.wrapUpNote, DEFAULTS.wrapUpNote)
   };
+}
+async function getBusinessName(organizationId) {
+  const settings = await getOrgSettings(organizationId);
+  const fromProfile = settings.businessProfile?.businessName?.trim();
+  if (fromProfile) return fromProfile;
+  const [org] = await db.select({ name: organizationsTable.name }).from(organizationsTable).where(eq(organizationsTable.id, organizationId));
+  return org?.name?.trim() || "our team";
 }
 async function getAiInstructions(organizationId) {
   const settings = await getOrgSettings(organizationId);
   return settings.aiInstructions?.trim() ?? "";
+}
+function sanitizeStageBehavior(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  const action = entry.action;
+  if (!STAGE_BEHAVIOR_ACTIONS.includes(action)) return null;
+  if (action === "enroll") {
+    const target = entry.enrollPlaybookId;
+    if (typeof target !== "string" || target.trim().length === 0) {
+      return { action: "complete" };
+    }
+    return { action, enrollPlaybookId: target };
+  }
+  return { action };
 }
 var LEGACY_SERVICE_SLUGS, DEFAULT_SERVICE_AREAS, DEFAULT_SERVICES, MAX_REMINDER_LEAD_HOURS;
 var init_settings2 = __esm({
@@ -45532,6 +46047,7 @@ var init_settings2 = __esm({
     "use strict";
     init_src();
     init_drizzle_orm();
+    init_orgFlavor();
     LEGACY_SERVICE_SLUGS = {
       "water-restoration": "water-damage-restoration",
       "emergency-tarping": "emergency-roofing"
@@ -45852,6 +46368,143 @@ var init_send_gate = __esm({
   }
 });
 
+// src/services/engagement-links.ts
+import { randomBytes as randomBytes2 } from "node:crypto";
+async function getOrCreateEngagementLink(organizationId, contactId, kind, leadId) {
+  const [existing] = await db.select().from(engagementLinksTable).where(
+    and(
+      eq(engagementLinksTable.contactId, contactId),
+      eq(engagementLinksTable.kind, kind)
+    )
+  );
+  if (existing) return existing;
+  try {
+    const [row] = await db.insert(engagementLinksTable).values({
+      organizationId,
+      contactId,
+      leadId: leadId ?? null,
+      kind,
+      token: randomBytes2(18).toString("base64url")
+    }).returning();
+    return row;
+  } catch (err) {
+    const [row] = await db.select().from(engagementLinksTable).where(
+      and(
+        eq(engagementLinksTable.contactId, contactId),
+        eq(engagementLinksTable.kind, kind)
+      )
+    );
+    if (row) return row;
+    throw err;
+  }
+}
+function engagementLinkUrl(link) {
+  return link.kind === "review" ? `${publicBaseUrl()}/api/v1/public/el/${link.token}` : `${publicBaseUrl()}/api/v1/public/referrals/${link.token}`;
+}
+async function findEngagementLink(token) {
+  const [row] = await db.select().from(engagementLinksTable).where(eq(engagementLinksTable.token, token));
+  return row ?? null;
+}
+async function recordReviewClick(link) {
+  await db.update(engagementLinksTable).set({
+    clickCount: sql`${engagementLinksTable.clickCount} + 1`,
+    lastClickedAt: /* @__PURE__ */ new Date()
+  }).where(eq(engagementLinksTable.id, link.id));
+  await db.insert(activitiesTable).values({
+    organizationId: link.organizationId,
+    leadId: link.leadId,
+    contactId: link.contactId,
+    type: "review_link_clicked",
+    title: "Review link clicked",
+    metadata: { engagementLinkId: link.id }
+  });
+  const settings = await getOrgSettings(link.organizationId);
+  const placeId = settings.googleReviews?.placeId;
+  return placeId ? `https://search.google.com/local/writereview?placeid=${encodeURIComponent(placeId)}` : settings.businessProfile?.website || publicBaseUrl();
+}
+async function recordReferralSubmission(link, submission) {
+  const [referrer] = await db.select().from(contactsTable).where(eq(contactsTable.id, link.contactId));
+  const referrerName = referrer && `${referrer.firstName ?? ""} ${referrer.lastName ?? ""}`.trim() || "a customer";
+  const organizationId = link.organizationId;
+  const email2 = submission.email?.trim().toLowerCase() || null;
+  const phone = submission.phone ? submission.phone.replace(/[^\d+]/g, "") : null;
+  const [firstName, ...rest] = submission.name.trim().split(/\s+/);
+  const touch = buildTouch({ channel: "referral", source: "referral" });
+  const created = await db.transaction(async (tx) => {
+    const matchers = [];
+    if (email2) matchers.push(sql`lower(${contactsTable.email}) = ${email2}`);
+    if (phone) {
+      matchers.push(
+        sql`regexp_replace(coalesce(${contactsTable.phone}, ''), '[^0-9+]', '', 'g') = ${phone}`
+      );
+    }
+    const [existingContact] = matchers.length ? await tx.select().from(contactsTable).where(and(eq(contactsTable.organizationId, organizationId), or(...matchers))).limit(1) : [];
+    let contactId;
+    if (existingContact) {
+      contactId = existingContact.id;
+    } else {
+      const [contact] = await tx.insert(contactsTable).values({
+        organizationId,
+        firstName: firstName || "Unknown",
+        lastName: rest.join(" ") || null,
+        email: submission.email?.trim() || null,
+        phone: submission.phone?.trim() || null
+      }).returning();
+      contactId = contact.id;
+    }
+    const [lead] = await tx.insert(leadsTable).values({
+      organizationId,
+      contactId,
+      status: "new",
+      summary: submission.notes ? `Referred by ${referrerName}. ${submission.notes}` : `Referred by ${referrerName}.`,
+      sourceDetail: `referred-by:${link.contactId}`,
+      ...leadAttributionColumns({
+        source: "referral",
+        creationMethod: "referral",
+        touch
+      })
+    }).returning();
+    return { leadId: lead.id, contactId };
+  });
+  await db.update(engagementLinksTable).set({
+    submissionCount: sql`${engagementLinksTable.submissionCount} + 1`
+  }).where(eq(engagementLinksTable.id, link.id));
+  await db.insert(activitiesTable).values([
+    {
+      organizationId: link.organizationId,
+      leadId: created.leadId,
+      type: "referral_received",
+      title: `Referral from ${referrerName}`,
+      metadata: { referrerContactId: link.contactId }
+    },
+    {
+      organizationId: link.organizationId,
+      leadId: link.leadId,
+      contactId: link.contactId,
+      type: "referral_submitted",
+      title: `${referrerName} referred ${submission.name}`,
+      metadata: { referredLeadId: created.leadId }
+    }
+  ]);
+  emitAutomationEvent(link.organizationId, "lead.created", {
+    leadId: created.leadId,
+    contactId: created.contactId,
+    fields: { "lead.status": "new", "lead.source": "referral" }
+  });
+  return { leadId: created.leadId };
+}
+var init_engagement_links2 = __esm({
+  "src/services/engagement-links.ts"() {
+    "use strict";
+    init_src();
+    init_drizzle_orm();
+    init_automation();
+    init_attribution();
+    init_send_gate();
+    init_settings2();
+  }
+});
+
 // src/services/playbook-learning.ts
 function stepVariants(step) {
   const base = {
@@ -46104,13 +46757,14 @@ async function ensureDefaultPlaybook(organizationId) {
       )
     );
     if (existing) return;
+    const legacy = await isLegacyDefaultOrg(organizationId);
     await tx.insert(playbooksTable).values({
       organizationId,
       name: DEFAULT_PLAYBOOK_NAME,
       seedKey: DEFAULT_PLAYBOOK_SEED_KEY,
       isActive: true,
       enrollmentRules: {},
-      steps: DEFAULT_STEPS
+      steps: legacy ? DEFAULT_STEPS : GENERIC_STEPS
     });
   });
 }
@@ -46144,11 +46798,14 @@ async function autoEnrollLead(organizationId, leadId) {
     const playbooks = await db.select().from(playbooksTable).where(
       and(
         eq(playbooksTable.organizationId, organizationId),
-        eq(playbooksTable.isActive, true)
+        eq(playbooksTable.isActive, true),
+        // Post-sale playbooks are milestone-gated: they enroll only via
+        // handlePostSaleTransition, never at lead creation.
+        eq(playbooksTable.kind, "outreach")
       )
     ).orderBy(desc(playbooksTable.createdAt));
     const match = playbooks.find(
-      (p) => p.steps.length > 0 && rulesMatch(p, lead)
+      (p) => p.category === "acquisition" && p.steps.length > 0 && rulesMatch(p, lead)
     );
     if (!match) return null;
     return await enrollLead(organizationId, leadId, match);
@@ -46168,6 +46825,8 @@ async function enrollLead(organizationId, leadId, playbook) {
       organizationId,
       playbookId: playbook.id,
       leadId,
+      kind: playbook.kind,
+      category: playbook.category,
       status: "active",
       currentStep: 0,
       nextRunAt: runAt
@@ -46182,7 +46841,11 @@ async function enrollLead(organizationId, leadId, playbook) {
     });
     return enrollment;
   } catch (err) {
-    if (err instanceof Error && /playbook_enrollments_lead_active_idx/.test(err.message)) {
+    const messages = [
+      err instanceof Error ? err.message : "",
+      err instanceof Error && err.cause instanceof Error ? err.cause.message : ""
+    ].join(" ");
+    if (/playbook_enrollments_lead_(playbook_)?active_idx/.test(messages)) {
       return null;
     }
     throw err;
@@ -46234,13 +46897,36 @@ async function executePlaybookStep(organizationId, params) {
       eq(leadsTable.organizationId, organizationId)
     )
   );
-  if (!lead || !OUTREACH_ACTIVE_STATUSES.includes(lead.status)) {
-    await finishEnrollment(
-      enrollment.id,
-      "completed",
-      lead ? `lead moved to ${lead.status}` : "lead deleted"
-    );
-    return { status: "skipped", detail: "lead past outreach stages" };
+  if (!lead) {
+    await finishEnrollment(enrollment.id, "completed", "lead deleted");
+    return { status: "skipped", detail: "lead deleted" };
+  }
+  if (playbook.kind === "post_sale") {
+    if (!POST_SALE_ACTIVE_STATUSES.includes(lead.status)) {
+      await finishEnrollment(
+        enrollment.id,
+        "completed",
+        `lead moved to ${lead.status}`
+      );
+      return { status: "skipped", detail: "lead past playbook stages" };
+    }
+  } else if (playbook.category === "acquisition") {
+    const behaviors = await getPlaybookStageBehaviors(organizationId);
+    const behavior = behaviors[lead.status] ?? { action: "complete" };
+    const continues = behavior.action === "continue" || // An "enroll into this very playbook" stage must not complete itself.
+    behavior.action === "enroll" && behavior.enrollPlaybookId === playbook.id;
+    if (!continues) {
+      if (behavior.action === "pause") {
+        await pauseEnrollment(enrollment.id, `lead moved to ${lead.status}`);
+        return { status: "skipped", detail: "paused by stage behavior" };
+      }
+      await finishEnrollment(
+        enrollment.id,
+        behavior.action === "cancel" ? "stopped" : "completed",
+        `lead moved to ${lead.status}`
+      );
+      return { status: "skipped", detail: "lead past outreach stages" };
+    }
   }
   const [contact] = await db.select().from(contactsTable).where(
     and(
@@ -46364,7 +47050,7 @@ async function executePlaybookStep(organizationId, params) {
   let sendResult = null;
   let skipDetail = null;
   const settings = await getOrgSettings(organizationId);
-  const businessName = settings.businessProfile.businessName ?? CLIENT.businessShortName;
+  const businessName = await getBusinessName(organizationId);
   const variant = await chooseVariant(organizationId, playbook, stepIndex, step);
   const draft = await draftOutreachMessage({
     channel: step.channel,
@@ -46377,6 +47063,20 @@ async function executePlaybookStep(organizationId, params) {
     stepNumber: stepIndex + 1,
     totalSteps: playbook.steps.length
   });
+  let linkSuffix = "";
+  if (step.linkKind === "review" || step.linkKind === "referral") {
+    const link = await getOrCreateEngagementLink(
+      organizationId,
+      contact.id,
+      step.linkKind,
+      lead.id
+    );
+    linkSuffix = step.linkKind === "review" ? `
+
+Leave us a review: ${engagementLinkUrl(link)}` : `
+
+Know someone we can help? Pass along their name: ${engagementLinkUrl(link)}`;
+  }
   if (gateSkipReason) {
     skipDetail = `blocked: ${gateSkipReason}`;
   } else {
@@ -46384,11 +47084,11 @@ async function executePlaybookStep(organizationId, params) {
       if (step.channel === "email") {
         sendResult = await providers.email.send(
           contact.email,
-          variant.subject ?? step.subject ?? `${businessName} \u2014 about your roof`,
-          draft.body + unsubscribeFooter(organizationId, contact.id)
+          variant.subject ?? step.subject ?? `${businessName} \u2014 following up`,
+          draft.body + linkSuffix + unsubscribeFooter(organizationId, contact.id)
         );
       } else {
-        sendResult = await providers.sms.send(contact.phone, draft.body);
+        sendResult = await providers.sms.send(contact.phone, draft.body + linkSuffix);
       }
     } catch (err) {
       const address = step.channel === "email" ? contact.email : contact.phone;
@@ -46477,6 +47177,19 @@ async function executePlaybookStep(organizationId, params) {
   }
   return sendResult ? { status: "success", detail: `${step.channel}:${sendResult.provider}` } : { status: "skipped", detail: skipDetail ?? "unreachable" };
 }
+async function pauseEnrollment(enrollmentId, reason) {
+  await db.update(playbookEnrollmentsTable).set({ status: "paused", pauseReason: reason }).where(
+    and(
+      eq(playbookEnrollmentsTable.id, enrollmentId),
+      eq(playbookEnrollmentsTable.status, "active")
+    )
+  );
+  await appendHistory(enrollmentId, {
+    at: (/* @__PURE__ */ new Date()).toISOString(),
+    kind: "paused",
+    detail: reason
+  });
+}
 async function finishEnrollment(enrollmentId, status, reason) {
   await db.update(playbookEnrollmentsTable).set({ status, pauseReason: reason, nextRunAt: null }).where(eq(playbookEnrollmentsTable.id, enrollmentId));
   await appendHistory(enrollmentId, {
@@ -46485,13 +47198,15 @@ async function finishEnrollment(enrollmentId, status, reason) {
     detail: reason
   });
 }
-async function stopEnrollmentsForLead(organizationId, leadId, reason, status = "completed") {
+async function stopEnrollmentsForLead(organizationId, leadId, reason, status = "completed", kind, category) {
   try {
     const live = await db.select().from(playbookEnrollmentsTable).where(
       and(
         eq(playbookEnrollmentsTable.organizationId, organizationId),
         eq(playbookEnrollmentsTable.leadId, leadId),
-        inArray(playbookEnrollmentsTable.status, ["active", "paused"])
+        inArray(playbookEnrollmentsTable.status, ["active", "paused"]),
+        ...kind ? [eq(playbookEnrollmentsTable.kind, kind)] : [],
+        ...category ? [eq(playbookEnrollmentsTable.category, category)] : []
       )
     );
     for (const enrollment of live) {
@@ -46506,25 +47221,16 @@ async function stopEnrollmentsForLead(organizationId, leadId, reason, status = "
     console.error("[playbooks] stopEnrollmentsForLead failed:", err);
   }
 }
-async function resumeEnrollment(organizationId, enrollmentId) {
-  const [enrollment] = await db.select().from(playbookEnrollmentsTable).where(
+async function enrollLeadInPlaybookById(organizationId, leadId, playbookId) {
+  const [playbook] = await db.select().from(playbooksTable).where(
     and(
-      eq(playbookEnrollmentsTable.id, enrollmentId),
-      eq(playbookEnrollmentsTable.organizationId, organizationId)
+      eq(playbooksTable.id, playbookId),
+      eq(playbooksTable.organizationId, organizationId),
+      eq(playbooksTable.isActive, true)
     )
   );
-  if (!enrollment || enrollment.status !== "paused") return null;
-  const [playbook] = await db.select().from(playbooksTable).where(eq(playbooksTable.id, enrollment.playbookId));
-  const step = playbook?.steps[enrollment.currentStep];
-  if (!playbook || !step) return null;
-  const runAt = new Date(Date.now() + Math.min(step.delayMinutes, 60) * 6e4);
-  const [updated] = await db.update(playbookEnrollmentsTable).set({ status: "active", pauseReason: null, nextRunAt: runAt }).where(eq(playbookEnrollmentsTable.id, enrollment.id)).returning();
-  await scheduleStep(updated, updated.currentStep, runAt);
-  await appendHistory(enrollment.id, {
-    at: (/* @__PURE__ */ new Date()).toISOString(),
-    kind: "resumed"
-  });
-  return updated;
+  if (!playbook || playbook.steps.length === 0) return null;
+  return enrollLead(organizationId, leadId, playbook);
 }
 async function skipEnrollmentStep(organizationId, enrollmentId) {
   const [enrollment] = await db.select().from(playbookEnrollmentsTable).where(
@@ -46576,14 +47282,83 @@ async function getLeadEnrollment(organizationId, leadId) {
     totalSteps: row.steps.length
   };
 }
-var OUTREACH_ACTIVE_STATUSES, DEFAULT_PLAYBOOK_SEED_KEY, DEFAULT_PLAYBOOK_NAME, DEFAULT_STEPS;
+async function applyStageBehaviorToLead(organizationId, leadId, status) {
+  try {
+    const behaviors = await getPlaybookStageBehaviors(organizationId);
+    const behavior = behaviors[status] ?? { action: "complete" };
+    switch (behavior.action) {
+      case "continue":
+        return;
+      case "pause":
+        await stopEnrollmentsForLead(
+          organizationId,
+          leadId,
+          `lead moved to ${status}`,
+          "paused",
+          void 0,
+          "acquisition"
+        );
+        return;
+      case "cancel":
+        await stopEnrollmentsForLead(
+          organizationId,
+          leadId,
+          `lead moved to ${status}`,
+          "stopped",
+          void 0,
+          "acquisition"
+        );
+        return;
+      case "enroll": {
+        const target = behavior.enrollPlaybookId;
+        if (target) {
+          const [live] = await db.select({ playbookId: playbookEnrollmentsTable.playbookId }).from(playbookEnrollmentsTable).where(
+            and(
+              eq(playbookEnrollmentsTable.organizationId, organizationId),
+              eq(playbookEnrollmentsTable.leadId, leadId),
+              inArray(playbookEnrollmentsTable.status, ["active", "paused"]),
+              eq(playbookEnrollmentsTable.category, "acquisition")
+            )
+          );
+          if (live?.playbookId === target) return;
+        }
+        await stopEnrollmentsForLead(
+          organizationId,
+          leadId,
+          `lead moved to ${status} \u2014 handed off`,
+          "completed",
+          void 0,
+          "acquisition"
+        );
+        if (target) {
+          await enrollLeadInPlaybookById(organizationId, leadId, target);
+        }
+        return;
+      }
+      case "complete":
+      default:
+        await stopEnrollmentsForLead(
+          organizationId,
+          leadId,
+          `lead moved to ${status}`,
+          "completed",
+          void 0,
+          "acquisition"
+        );
+    }
+  } catch (err) {
+    console.error("[playbooks] applyStageBehaviorToLead failed:", err);
+  }
+}
+var OUTREACH_ACTIVE_STATUSES, POST_SALE_ACTIVE_STATUSES, DEFAULT_PLAYBOOK_SEED_KEY, DEFAULT_PLAYBOOK_NAME, DEFAULT_STEPS, GENERIC_STEPS;
 var init_playbooks2 = __esm({
   "src/services/playbooks.ts"() {
     "use strict";
     init_src();
     init_drizzle_orm();
-    init_client_config();
+    init_orgFlavor();
     init_audit2();
+    init_engagement_links2();
     init_playbook_learning2();
     init_providers();
     init_send_gate();
@@ -46594,6 +47369,14 @@ var init_playbooks2 = __esm({
       "contact_attempted",
       "follow_up",
       "nurture"
+    ];
+    POST_SALE_ACTIVE_STATUSES = [
+      "won",
+      "production_scheduled",
+      "in_progress",
+      "final_walkthrough",
+      "completed",
+      "review_requested"
     ];
     DEFAULT_PLAYBOOK_SEED_KEY = "default.new_lead_outreach";
     DEFAULT_PLAYBOOK_NAME = "New lead outreach";
@@ -46627,6 +47410,210 @@ var init_playbooks2 = __esm({
         prompt: "Final touch of the sequence, about nine days in. Politely close the loop: we'll stop reaching out but they can reply any time; include a one-line recap of what we can do for them."
       }
     ];
+    GENERIC_STEPS = [
+      {
+        channel: "email",
+        delayMinutes: 5,
+        subject: "We got your request \u2014 we're on it",
+        prompt: "First touch, minutes after the prospect asked for help. Warmly confirm we received their request, set the expectation that a real person will reach out shortly, and invite them to reply with any details. Short and human, no pressure."
+      },
+      {
+        channel: "sms",
+        delayMinutes: 60 * 4,
+        prompt: "Same-day text follow-up. One or two sentences: we're ready to schedule a time to talk and they can reply to this text to pick a time."
+      },
+      {
+        channel: "email",
+        delayMinutes: 60 * 24,
+        subject: "Ready when you are",
+        prompt: "Day-two follow-up. Gently remind them we're ready to help, mention the specific request they made, and give an easy next step. Helpful, not salesy."
+      },
+      {
+        channel: "sms",
+        delayMinutes: 60 * 24 * 3,
+        prompt: "Day-five nudge. Brief, friendly check-in: still happy to help whenever they're ready."
+      },
+      {
+        channel: "email",
+        delayMinutes: 60 * 24 * 4,
+        subject: "Should we keep your spot open?",
+        prompt: "Final touch of the sequence, about nine days in. Politely close the loop: we'll stop reaching out but they can reply any time; include a one-line recap of what we can do for them."
+      }
+    ];
+  }
+});
+
+// src/services/post-sale.ts
+function postSaleSeeds(legacy) {
+  const project = legacy ? "roof" : "project";
+  return [
+    {
+      seedKey: REVIEW_PLAYBOOK_SEED_KEY,
+      name: "Review request",
+      milestoneStatuses: ["completed"],
+      steps: [
+        {
+          channel: "email",
+          delayMinutes: 2 * DAY,
+          subject: "How did we do?",
+          linkKind: "review",
+          prompt: `The customer's ${project} work wrapped up a couple of days ago. Warmly thank them, ask how everything turned out, and invite them to leave a quick review using the link below \u2014 it genuinely helps a small business. One short paragraph, no pressure.`
+        },
+        {
+          channel: "email",
+          delayMinutes: 7 * DAY,
+          subject: "A quick favor?",
+          linkKind: "review",
+          prompt: "Gentle one-time reminder about the review request sent last week. Keep it to two sentences, acknowledge they're busy, and note the link below takes under a minute. Never guilt-trip."
+        }
+      ]
+    },
+    {
+      seedKey: REFERRAL_PLAYBOOK_SEED_KEY,
+      name: "Referral request",
+      milestoneStatuses: ["completed"],
+      steps: [
+        {
+          channel: "email",
+          delayMinutes: 14 * DAY,
+          subject: "Know someone we can help?",
+          linkKind: "referral",
+          prompt: `Two weeks after their ${project} was finished. Thank them again and ask if a friend or neighbor could use the same help \u2014 they can pass along a name with the link below. Warm and brief.`
+        }
+      ]
+    },
+    {
+      seedKey: MAINTENANCE_PLAYBOOK_SEED_KEY,
+      name: "Maintenance check-in",
+      milestoneStatuses: ["completed"],
+      steps: [
+        {
+          channel: "email",
+          delayMinutes: 90 * DAY,
+          subject: "Checking in \u2014 how's everything holding up?",
+          prompt: legacy ? "Seasonal check-in three months after their roofing project. Ask how the roof has held up through the recent weather, remind them we're happy to take a quick look any time, and invite them to reply with questions." : "Check-in three months after their project wrapped up. Ask how everything is holding up, remind them we're happy to help any time, and invite them to reply with questions."
+        },
+        {
+          channel: "email",
+          delayMinutes: 180 * DAY,
+          subject: "Time for a seasonal check-up?",
+          prompt: legacy ? "Six-month seasonal reminder: offer a free maintenance inspection before the harsh season, one short paragraph." : "Six-month check-in: offer a quick maintenance review or tune-up, one short paragraph."
+        }
+      ]
+    }
+  ];
+}
+async function ensurePostSalePlaybooks(organizationId) {
+  const legacy = await isLegacyDefaultOrg(organizationId);
+  const seeds = postSaleSeeds(legacy);
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`post-sale-playbooks:${organizationId}`}))`
+    );
+    const existing = await tx.select({ seedKey: playbooksTable.seedKey }).from(playbooksTable).where(eq(playbooksTable.organizationId, organizationId));
+    const have = new Set(existing.map((r) => r.seedKey));
+    const missing = seeds.filter((s) => !have.has(s.seedKey));
+    if (missing.length === 0) return;
+    await tx.insert(playbooksTable).values(
+      missing.map((s) => ({
+        organizationId,
+        name: s.name,
+        seedKey: s.seedKey,
+        kind: "post_sale",
+        isActive: false,
+        enrollmentRules: { milestoneStatuses: s.milestoneStatuses },
+        steps: s.steps
+      }))
+    );
+  });
+}
+async function handlePostSaleTransition(organizationId, leadId, newStatus) {
+  try {
+    await ensurePostSalePlaybooks(organizationId);
+    const candidates = await db.select().from(playbooksTable).where(
+      and(
+        eq(playbooksTable.organizationId, organizationId),
+        eq(playbooksTable.kind, "post_sale"),
+        eq(playbooksTable.isActive, true)
+      )
+    );
+    for (const playbook of candidates) {
+      const milestones = playbook.enrollmentRules?.milestoneStatuses ?? [];
+      if (playbook.steps.length === 0) continue;
+      if (!milestones.includes(newStatus)) continue;
+      await enrollLead(organizationId, leadId, playbook);
+    }
+  } catch (err) {
+    console.error("[post-sale] milestone enrollment failed:", err);
+  }
+}
+async function classifyWonLead(organizationId, leadId) {
+  try {
+    const [lead] = await db.select().from(leadsTable).where(
+      and(
+        eq(leadsTable.id, leadId),
+        eq(leadsTable.organizationId, organizationId)
+      )
+    );
+    if (!lead || lead.wonAt) return;
+    const [accepted] = await db.select({ totalCents: estimatesTable.totalCents }).from(estimatesTable).where(
+      and(
+        eq(estimatesTable.organizationId, organizationId),
+        eq(estimatesTable.leadId, leadId),
+        eq(estimatesTable.status, "accepted")
+      )
+    ).orderBy(desc(estimatesTable.acceptedAt));
+    const [touchStats] = await db.select({
+      sent: sql`count(*)::int`,
+      engaged: sql`count(*) filter (where ${playbookTouchesTable.repliedAt} is not null or ${playbookTouchesTable.bookedAt} is not null)::int`
+    }).from(playbookTouchesTable).where(
+      and(
+        eq(playbookTouchesTable.organizationId, organizationId),
+        eq(playbookTouchesTable.leadId, leadId)
+      )
+    );
+    const revenueCents = accepted?.totalCents ?? lead.estimatedValueCents ?? null;
+    let attribution;
+    if (revenueCents == null) {
+      attribution = "unknown";
+    } else if (!accepted) {
+      attribution = "estimated";
+    } else if (PLATFORM_CAPTURE_METHODS.has(lead.creationMethod ?? "") && (touchStats?.engaged ?? 0) > 0) {
+      attribution = "directly_attributed";
+    } else if ((touchStats?.sent ?? 0) > 0) {
+      attribution = "assisted";
+    } else {
+      attribution = "self_reported";
+    }
+    await db.update(leadsTable).set({
+      wonAt: /* @__PURE__ */ new Date(),
+      wonRevenueCents: revenueCents,
+      wonAttribution: attribution
+    }).where(and(eq(leadsTable.id, leadId), sql`${leadsTable.wonAt} is null`));
+  } catch (err) {
+    console.error("[post-sale] won classification failed:", err);
+  }
+}
+var REVIEW_PLAYBOOK_SEED_KEY, REFERRAL_PLAYBOOK_SEED_KEY, MAINTENANCE_PLAYBOOK_SEED_KEY, DAY, PLATFORM_CAPTURE_METHODS;
+var init_post_sale = __esm({
+  "src/services/post-sale.ts"() {
+    "use strict";
+    init_src();
+    init_drizzle_orm();
+    init_orgFlavor();
+    init_playbooks2();
+    REVIEW_PLAYBOOK_SEED_KEY = "post_sale.review_request";
+    REFERRAL_PLAYBOOK_SEED_KEY = "post_sale.referral_request";
+    MAINTENANCE_PLAYBOOK_SEED_KEY = "post_sale.maintenance_checkin";
+    DAY = 60 * 24;
+    PLATFORM_CAPTURE_METHODS = /* @__PURE__ */ new Set([
+      "assessment",
+      "widget",
+      "form",
+      "concierge",
+      "capture",
+      "referral"
+    ]);
   }
 });
 
@@ -46636,13 +47623,13 @@ import {
   createDecipheriv,
   createHash,
   createHmac as createHmac2,
-  randomBytes as randomBytes2,
+  randomBytes as randomBytes3,
   timingSafeEqual as timingSafeEqual2
 } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 function generateWebhookSecret() {
-  return `whsec_${randomBytes2(24).toString("hex")}`;
+  return `whsec_${randomBytes3(24).toString("hex")}`;
 }
 function encryptionKey() {
   const raw = process.env.SESSION_SECRET;
@@ -46650,7 +47637,7 @@ function encryptionKey() {
   return createHash("sha256").update(raw).digest();
 }
 function encryptSecret(plaintext) {
-  const iv = randomBytes2(12);
+  const iv = randomBytes3(12);
   const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv);
   const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -47006,7 +47993,7 @@ function parseCsv(text2) {
   if (row.some((f) => f.trim() !== "")) rows.push(row);
   return rows;
 }
-function clean(v, max = 200) {
+function clean2(v, max = 200) {
   const s = (v ?? "").trim();
   return s ? s.slice(0, max) : null;
 }
@@ -47023,7 +48010,7 @@ async function importLeads(organizationId, params) {
     return { error: "Map at least an Email or Phone column" };
   }
   const defaultStatus = VALID_STATUSES.has(params.defaultStatus ?? "") ? params.defaultStatus : "nurture";
-  const source = clean(params.defaultSource, 100) ?? "csv-import";
+  const source = clean2(params.defaultSource, 100) ?? "csv-import";
   let imported = 0;
   let duplicates = 0;
   let skipped = 0;
@@ -47035,9 +48022,9 @@ async function importLeads(organizationId, params) {
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     const get = (f) => m[f] === void 0 ? void 0 : row[m[f]];
-    const firstName = clean(get("firstName"), 100);
-    const email2 = clean(get("email"), 200)?.toLowerCase() ?? null;
-    const phone = clean(get("phone"), 40);
+    const firstName = clean2(get("firstName"), 100);
+    const email2 = clean2(get("email"), 200)?.toLowerCase() ?? null;
+    const phone = clean2(get("phone"), 40);
     const phoneDigits = phone ? phone.replace(/\D/g, "") : null;
     const rowNo = i + (params.hasHeader === false ? 1 : 2);
     if (!firstName) {
@@ -47072,14 +48059,14 @@ async function importLeads(organizationId, params) {
     }
     const isSuppressed = email2 && suppressedSet.has(`email:${normalizeAddress("email", email2)}`) || phone && suppressedSet.has(`sms:${normalizeAddress("sms", phone)}`);
     if (isSuppressed) suppressedCount++;
-    const rawStatus = clean(get("status"), 40);
+    const rawStatus = clean2(get("status"), 40);
     const status = rawStatus && VALID_STATUSES.has(rawStatus) ? rawStatus : defaultStatus;
     try {
       await db.transaction(async (tx) => {
         const [contact] = await tx.insert(contactsTable).values({
           organizationId,
           firstName,
-          lastName: clean(get("lastName"), 100),
+          lastName: clean2(get("lastName"), 100),
           email: email2,
           phone
         }).returning();
@@ -47087,10 +48074,10 @@ async function importLeads(organizationId, params) {
           organizationId,
           contactId: contact.id,
           status,
-          serviceType: clean(get("serviceType"), 100),
-          summary: clean(get("notes"), 500),
-          source: clean(get("source"), 100) ?? source,
-          latestSource: clean(get("source"), 100) ?? source,
+          serviceType: clean2(get("serviceType"), 100),
+          summary: clean2(get("notes"), 500),
+          source: clean2(get("source"), 100) ?? source,
+          latestSource: clean2(get("source"), 100) ?? source,
           creationMethod: "import"
         });
       });
@@ -47102,7 +48089,7 @@ async function importLeads(organizationId, params) {
   }
   const [record2] = await db.insert(leadImportsTable).values({
     organizationId,
-    fileName: clean(params.fileName, 200),
+    fileName: clean2(params.fileName, 200),
     totalRows: rows.length,
     imported,
     duplicates,
@@ -47244,7 +48231,7 @@ async function getOrgPlaybook(organizationId, playbookId) {
   return pb ?? null;
 }
 async function createCampaign(organizationId, params) {
-  const name = clean(params.name, 200);
+  const name = clean2(params.name, 200);
   if (!name) return { error: "Campaign name is required" };
   const playbook = await getOrgPlaybook(organizationId, params.playbookId);
   if (!playbook) return { error: "Playbook not found" };
@@ -47398,11 +48385,23 @@ async function drainCampaign(campaign) {
   `);
   const rows = claimed.rows;
   for (const row of rows) {
-    const outcome = await enrollCampaignLead(campaign, playbook, row.lead_id);
-    if (outcome.status === "skipped") {
-      await db.update(reactivationCampaignLeadsTable).set({ status: "skipped", detail: outcome.detail, enrollmentId: null }).where(eq(reactivationCampaignLeadsTable.id, row.id));
-    } else {
-      await db.update(reactivationCampaignLeadsTable).set({ enrollmentId: outcome.enrollmentId }).where(eq(reactivationCampaignLeadsTable.id, row.id));
+    try {
+      const outcome = await enrollCampaignLead(campaign, playbook, row.lead_id);
+      if (outcome.status === "skipped") {
+        await db.update(reactivationCampaignLeadsTable).set({ status: "skipped", detail: outcome.detail, enrollmentId: null }).where(eq(reactivationCampaignLeadsTable.id, row.id));
+      } else {
+        await db.update(reactivationCampaignLeadsTable).set({ enrollmentId: outcome.enrollmentId }).where(eq(reactivationCampaignLeadsTable.id, row.id));
+      }
+    } catch (err) {
+      console.error(
+        `[reactivation] drain failed for campaign ${campaign.id}:`,
+        err
+      );
+      await db.update(reactivationCampaignLeadsTable).set({
+        status: "pending",
+        enrollmentId: null,
+        detail: err instanceof Error ? err.message : "enrollment failed"
+      }).where(eq(reactivationCampaignLeadsTable.id, row.id));
     }
   }
   const [{ remaining }] = await db.select({
@@ -47571,208 +48570,6 @@ var init_reactivation2 = __esm({
     MAX_ERROR_SAMPLES = 20;
     MAX_CAMPAIGN_LEADS = 1e4;
     MAX_ENROLL_PER_TICK = 25;
-  }
-});
-
-// src/services/attribution.ts
-function buildTouch(params) {
-  const a = params.attribution ?? {};
-  const utm = {};
-  const map = [
-    ["utmSource", "source"],
-    ["utmMedium", "medium"],
-    ["utmCampaign", "campaign"],
-    ["utmTerm", "term"],
-    ["utmContent", "content"]
-  ];
-  for (const [key, short] of map) {
-    const v = clean2(a[key], 200);
-    if (v) utm[short] = v;
-  }
-  return {
-    channel: params.channel,
-    source: params.source,
-    at: (/* @__PURE__ */ new Date()).toISOString(),
-    ...clean2(a.landingPage) ? { landingPage: clean2(a.landingPage) } : {},
-    ...clean2(a.referrer) ? { referrer: clean2(a.referrer) } : {},
-    ...Object.keys(utm).length ? { utm } : {}
-  };
-}
-function leadAttributionColumns(params) {
-  const { touch } = params;
-  return {
-    source: params.source,
-    latestSource: params.source,
-    campaign: touch.utm?.campaign ?? null,
-    landingPage: touch.landingPage ?? null,
-    referrer: touch.referrer ?? null,
-    creationMethod: params.creationMethod,
-    anonymousId: clean2(params.anonymousId, 100) ?? null,
-    firstTouch: touch,
-    lastTouch: touch
-  };
-}
-function repeatTouchColumns(params) {
-  return {
-    latestSource: params.source,
-    lastTouch: params.touch,
-    ...params.touch.utm?.campaign && !params.existing.campaign ? { campaign: params.touch.utm.campaign } : {},
-    ...!params.existing.anonymousId && clean2(params.anonymousId, 100) ? { anonymousId: clean2(params.anonymousId, 100) } : {}
-  };
-}
-async function getVisitorBehavior(organizationId, anonymousId) {
-  const anon = clean2(anonymousId, 100);
-  if (!anon) return EMPTY_BEHAVIOR;
-  const since = new Date(Date.now() - 90 * 24 * 60 * 6e4);
-  const events = await db.select({
-    eventName: analyticsEventsTable.eventName,
-    sessionId: analyticsEventsTable.sessionId,
-    path: analyticsEventsTable.path,
-    properties: analyticsEventsTable.properties,
-    occurredAt: analyticsEventsTable.occurredAt
-  }).from(analyticsEventsTable).where(
-    and(
-      eq(analyticsEventsTable.organizationId, organizationId),
-      eq(analyticsEventsTable.anonymousId, anon),
-      gte(analyticsEventsTable.occurredAt, since)
-    )
-  ).orderBy(asc(analyticsEventsTable.occurredAt)).limit(2e3);
-  if (events.length === 0) return EMPTY_BEHAVIOR;
-  const sessions = /* @__PURE__ */ new Set();
-  const days = /* @__PURE__ */ new Set();
-  const pathViews = /* @__PURE__ */ new Map();
-  const highIntent = /* @__PURE__ */ new Set();
-  const tools = /* @__PURE__ */ new Set();
-  let pageViews = 0;
-  let formStarts = 0;
-  let formSubmits = 0;
-  for (const e2 of events) {
-    if (e2.sessionId) sessions.add(e2.sessionId);
-    days.add(e2.occurredAt.toISOString().slice(0, 10));
-    if (e2.eventName === "page_view") {
-      pageViews++;
-      const path2 = e2.path ?? "/";
-      pathViews.set(path2, (pathViews.get(path2) ?? 0) + 1);
-      for (const { pattern, label } of HIGH_INTENT_PATTERNS) {
-        if (pattern.test(path2)) highIntent.add(label);
-      }
-    }
-    if (TOOL_EVENTS.has(e2.eventName)) {
-      tools.add(e2.eventName.replace(/_started$|_opened$/, ""));
-    }
-    if (e2.eventName === "form_started" || e2.eventName === "assessment_started") formStarts++;
-    if (e2.eventName === "form_submitted" || e2.eventName === "assessment_submitted") formSubmits++;
-  }
-  const firstSeen = events[0].occurredAt;
-  const lastSeen = events[events.length - 1].occurredAt;
-  const topPages = [...pathViews.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([path2, views]) => ({ path: path2, views }));
-  const abandonedForms = Math.max(0, formStarts - formSubmits);
-  const spanDays = Math.max(
-    1,
-    Math.round((lastSeen.getTime() - firstSeen.getTime()) / 864e5)
-  );
-  const highlights = [];
-  if (days.size > 1) highlights.push(`Returned ${days.size}\xD7 over ${spanDays} day${spanDays === 1 ? "" : "s"}`);
-  if (highIntent.size > 0) highlights.push(`Viewed ${[...highIntent].join(", ")} page${highIntent.size === 1 ? "" : "s"}`);
-  if (tools.size > 0) highlights.push(`Started ${[...tools].join(", ")}`);
-  if (abandonedForms > 0) highlights.push(`Abandoned ${abandonedForms} form${abandonedForms === 1 ? "" : "s"} before converting`);
-  if (pageViews > 0) highlights.push(`${pageViews} page view${pageViews === 1 ? "" : "s"} across ${sessions.size || 1} visit${sessions.size === 1 ? "" : "s"}`);
-  return {
-    pageViews,
-    sessions: sessions.size,
-    activeDays: days.size,
-    firstSeenAt: firstSeen.toISOString(),
-    lastSeenAt: lastSeen.toISOString(),
-    topPages,
-    highIntentPages: [...highIntent],
-    toolsStarted: [...tools],
-    abandonedForms,
-    highlights
-  };
-}
-function scoreBehavior(behavior, weights) {
-  let points = 0;
-  const reasons = [];
-  if (behavior.activeDays >= 2 && weights.returnVisitBonus > 0) {
-    points += weights.returnVisitBonus;
-    reasons.push(`Returned to the website on ${behavior.activeDays} separate days`);
-  }
-  if (behavior.highIntentPages.length > 0 && weights.engagedPagesBonus > 0) {
-    points += weights.engagedPagesBonus;
-    reasons.push(`Viewed high-intent pages (${behavior.highIntentPages.join(", ")})`);
-  }
-  if (behavior.toolsStarted.length > 0 && weights.toolUsageBonus > 0) {
-    points += weights.toolUsageBonus;
-    reasons.push(`Used on-site tools (${behavior.toolsStarted.join(", ")})`);
-  }
-  return { points, reasons };
-}
-async function behaviorSignals(organizationId, anonymousId, weights) {
-  const behavior = await getVisitorBehavior(organizationId, anonymousId);
-  const { points, reasons } = scoreBehavior(behavior, weights);
-  return { points, reasons, behavior };
-}
-async function getLeadBehaviorSummary(organizationId, leadId) {
-  const [lead] = await db.select({
-    anonymousId: leadsTable.anonymousId,
-    source: leadsTable.source,
-    latestSource: leadsTable.latestSource,
-    campaign: leadsTable.campaign,
-    landingPage: leadsTable.landingPage,
-    referrer: leadsTable.referrer,
-    creationMethod: leadsTable.creationMethod
-  }).from(leadsTable).where(and(eq(leadsTable.id, leadId), eq(leadsTable.organizationId, organizationId)));
-  if (!lead) return null;
-  const behavior = await getVisitorBehavior(organizationId, lead.anonymousId);
-  return {
-    linked: Boolean(lead.anonymousId),
-    attribution: {
-      source: lead.source,
-      latestSource: lead.latestSource,
-      campaign: lead.campaign,
-      landingPage: lead.landingPage,
-      referrer: lead.referrer,
-      creationMethod: lead.creationMethod
-    },
-    behavior
-  };
-}
-var clean2, HIGH_INTENT_PATTERNS, TOOL_EVENTS, EMPTY_BEHAVIOR, clampScore;
-var init_attribution = __esm({
-  "src/services/attribution.ts"() {
-    "use strict";
-    init_src();
-    init_drizzle_orm();
-    clean2 = (v, max = 500) => {
-      if (typeof v !== "string") return void 0;
-      const t = v.trim().slice(0, max);
-      return t || void 0;
-    };
-    HIGH_INTENT_PATTERNS = [
-      { pattern: /financ/i, label: "financing" },
-      { pattern: /pricing|cost|estimate/i, label: "pricing" },
-      { pattern: /services|repair|replace/i, label: "services" },
-      { pattern: /reviews|testimonial/i, label: "reviews" }
-    ];
-    TOOL_EVENTS = /* @__PURE__ */ new Set([
-      "assessment_started",
-      "form_started",
-      "tool_started",
-      "concierge_opened"
-    ]);
-    EMPTY_BEHAVIOR = {
-      pageViews: 0,
-      sessions: 0,
-      activeDays: 0,
-      firstSeenAt: null,
-      lastSeenAt: null,
-      topPages: [],
-      highIntentPages: [],
-      toolsStarted: [],
-      abandonedForms: 0,
-      highlights: []
-    };
-    clampScore = (score) => Math.max(0, Math.min(Math.round(score), 100));
   }
 });
 
@@ -48397,6 +49194,11 @@ async function handleMessage(params) {
         "paused"
       );
       await recordLeadOutcome(params.organizationId, conversation.leadId, "replied");
+      void dispatchWebhookEvent(params.organizationId, "lead.replied", {
+        leadId: conversation.leadId,
+        channel: "concierge"
+      }).catch(() => {
+      });
       await db.insert(auditEventsTable).values({
         organizationId: params.organizationId,
         actorUserId: null,
@@ -49082,6 +49884,7 @@ var CONCIERGE_DISCLOSURE_VERSION, DEFAULT_CFG, EMERGENCY_KEYWORDS, PROHIBITED_TO
 var init_concierge = __esm({
   "src/services/concierge.ts"() {
     "use strict";
+    init_webhooks2();
     init_src();
     init_drizzle_orm();
     init_automation();
@@ -49935,7 +50738,7 @@ __export(portal_exports, {
   revokePortalSession: () => revokePortalSession,
   verifyLoginCode: () => verifyLoginCode
 });
-import { createHash as createHash2, randomBytes as randomBytes3, randomInt, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
+import { createHash as createHash2, randomBytes as randomBytes4, randomInt, timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 function sha256(value) {
   return createHash2("sha256").update(value).digest("hex");
 }
@@ -49998,11 +50801,12 @@ async function requestLoginCode(params) {
     codeHash: sha256(code),
     expiresAt: new Date(Date.now() + CODE_TTL_MS)
   });
+  const businessName = await getBusinessName(params.organizationId);
   const firstName = contacts[0].firstName;
   const body = [
     `Hi ${firstName},`,
     "",
-    `Your ${CLIENT.businessShortName} portal sign-in code is: ${code}`,
+    `Your ${businessName} portal sign-in code is: ${code}`,
     "",
     "This code expires in 10 minutes. If you didn't request it, you can ignore this message."
   ].join("\n");
@@ -50010,14 +50814,14 @@ async function requestLoginCode(params) {
     if (channel === "email") {
       await providers.email.send(
         identifier,
-        `Your ${CLIENT.businessShortName} sign-in code`,
+        `Your ${businessName} sign-in code`,
         body
       );
     } else {
       const to = contacts[0].phone ?? identifier;
       await providers.sms.send(
         to,
-        `${CLIENT.businessShortName} sign-in code: ${code}. Expires in 10 minutes.`
+        `${businessName} sign-in code: ${code}. Expires in 10 minutes.`
       );
     }
   } catch (err) {
@@ -50046,7 +50850,7 @@ async function verifyLoginCode(params) {
     await db.update(portalLoginCodesTable).set({ attempts: record2.attempts + 1 }).where(eq(portalLoginCodesTable.id, record2.id));
     return null;
   }
-  const token = randomBytes3(32).toString("base64url");
+  const token = randomBytes4(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
   await db.transaction(async (tx) => {
     await tx.update(portalLoginCodesTable).set({ consumedAt: /* @__PURE__ */ new Date() }).where(eq(portalLoginCodesTable.id, record2.id));
@@ -50373,6 +51177,11 @@ async function postPortalMessage(params) {
     "paused"
   );
   await recordLeadOutcome(params.session.organizationId, lead.id, "replied");
+  void dispatchWebhookEvent(params.session.organizationId, "lead.replied", {
+    leadId: lead.id,
+    channel: "portal"
+  }).catch(() => {
+  });
   await notifyAssignedRepOfPortalMessage({
     organizationId: params.session.organizationId,
     leadId: lead.id,
@@ -50401,7 +51210,8 @@ var CODE_TTL_MS, REQUEST_CODE_WINDOW_MS, SESSION_TTL_MS, MAX_VERIFY_ATTEMPTS, JO
 var init_portal2 = __esm({
   "src/services/portal.ts"() {
     "use strict";
-    init_client_config();
+    init_settings2();
+    init_webhooks2();
     init_src();
     init_drizzle_orm();
     init_logger2();
@@ -50431,7 +51241,7 @@ var init_portal2 = __esm({
       {
         key: "inspection",
         label: "Inspection",
-        description: "Your on-site roof inspection is scheduled or under way.",
+        description: "Your on-site inspection is scheduled or under way.",
         statuses: ["inspection_scheduled", "inspection_completed"]
       },
       {
@@ -50455,7 +51265,7 @@ var init_portal2 = __esm({
       {
         key: "wrap_up",
         label: "Final walkthrough & done",
-        description: "Final quality walkthrough, then your roof is complete.",
+        description: "Final quality walkthrough, then your project is complete.",
         statuses: ["final_walkthrough", "completed", "review_requested"]
       }
     ];
@@ -50838,7 +51648,27 @@ function emitAutomationEvent(organizationId, event, context) {
     console.error(`[automation] event ${event} failed:`, err);
   });
 }
+function mirrorToWebhooks(organizationId, event, context) {
+  void dispatchWebhookEvent(organizationId, event, {
+    leadId: context.leadId ?? null,
+    contactId: context.contactId ?? null,
+    appointmentId: context.appointmentId ?? null,
+    ...context.fields ?? {}
+  }).catch((err) => {
+    console.error(`[webhooks] lifecycle dispatch ${event} failed:`, err);
+  });
+}
 async function runEvent(organizationId, event, context) {
+  if (event === "lead.created" || event === "appointment.booked") {
+    mirrorToWebhooks(organizationId, event, context);
+  }
+  if (event === "lead.updated" || event === "lead.assigned") {
+    const s = context.fields?.["lead.status"];
+    const changed = context.fields?.["lead.statusChanged"] !== false;
+    if (changed && (s === "qualified" || s === "won" || s === "lost")) {
+      mirrorToWebhooks(organizationId, `lead.${s}`, context);
+    }
+  }
   if (event === "lead.created" && context.leadId) {
     await autoEnrollLead(organizationId, context.leadId);
   } else if (event === "appointment.booked" && context.leadId) {
@@ -50851,16 +51681,27 @@ async function runEvent(organizationId, event, context) {
     await recordLeadOutcome(organizationId, context.leadId, "booked");
   } else if ((event === "lead.updated" || event === "lead.assigned") && context.leadId) {
     const status = context.fields?.["lead.status"];
-    if (typeof status === "string" && !OUTREACH_ACTIVE_STATUSES.includes(status)) {
+    const statusChanged = context.fields?.["lead.statusChanged"] !== false;
+    if (typeof status === "string") {
+      await applyStageBehaviorToLead(organizationId, context.leadId, status);
+    }
+    if (status === "lost") {
       await stopEnrollmentsForLead(
         organizationId,
         context.leadId,
-        `lead moved to ${status}`,
-        "completed"
+        "lead marked lost",
+        "stopped",
+        "post_sale"
       );
     }
     if (status === "won" || status === "lost") {
       await recordLeadOutcome(organizationId, context.leadId, status);
+    }
+    if (typeof status === "string" && statusChanged) {
+      if (status === "won") {
+        await classifyWonLead(organizationId, context.leadId);
+      }
+      await handlePostSaleTransition(organizationId, context.leadId, status);
     }
   }
   const rules = await db.select().from(automationsTable).where(
@@ -50988,7 +51829,7 @@ async function executeAction(organizationId, action, context, automationId) {
       try {
         res = channel === "email" ? await providers.email.send(
           contact.email,
-          rendered.subject ?? `${CLIENT.businessShortName} update`,
+          rendered.subject ?? `${await getBusinessName(organizationId)} update`,
           rendered.body + unsubscribeFooter(organizationId, contact.id)
         ) : await providers.sms.send(contact.phone, rendered.body);
       } catch (err) {
@@ -51220,7 +52061,7 @@ async function executeAction(organizationId, action, context, automationId) {
         return { type: action.type, status: "skipped", detail: "contact not found" };
       }
       const settings = await getOrgSettings(organizationId);
-      const businessName = settings.businessProfile.businessName ?? CLIENT.businessShortName;
+      const businessName = await getBusinessName(organizationId);
       const businessPhone = settings.businessProfile.phone ?? "";
       const windowLabel = new Intl.DateTimeFormat("en-US", {
         timeZone: process.env.CONCIERGE_TIMEZONE ?? "America/New_York",
@@ -51396,7 +52237,7 @@ async function renderTemplate(organizationId, action, context) {
   const settings = await getOrgSettings(organizationId);
   const vars = {
     "contact.firstName": contact?.firstName ?? "there",
-    "business.name": settings.businessProfile.businessName ?? CLIENT.businessShortName,
+    "business.name": await getBusinessName(organizationId),
     "business.phone": settings.businessProfile.phone ?? ""
   };
   for (const [key, value] of Object.entries(context.fields ?? {})) {
@@ -51455,10 +52296,6 @@ async function processDueScheduledActions(organizationId) {
   }
 }
 async function processScheduledWork(organizationId) {
-  await runStage("reactivation-drain", async () => {
-    const { drainReactivationCampaigns: drainReactivationCampaigns2 } = await Promise.resolve().then(() => (init_reactivation2(), reactivation_exports));
-    await drainReactivationCampaigns2(organizationId);
-  });
   await runStage("scheduled-actions", () => processDueScheduledActions(organizationId));
   await runStage("reactivation-drain", async () => {
     const { drainReactivationCampaigns: drainReactivationCampaigns2 } = await Promise.resolve().then(() => (init_reactivation2(), reactivation_exports));
@@ -51637,16 +52474,17 @@ async function ensureDefaultAutomations(organizationId) {
       await tx.update(automationsTable).set({ actions: nextActions }).where(eq(automationsTable.id, existing.id));
       return;
     }
+    const legacy = await isLegacyDefaultOrg(organizationId);
     const smsTemplateId = await seedTemplate({
       name: DEFAULT_ABANDONED_SMS_TEMPLATE_NAME,
       channel: "sms",
-      body: DEFAULT_ABANDONED_SMS_BODY
+      body: legacy ? DEFAULT_ABANDONED_SMS_BODY : GENERIC_ABANDONED_SMS_BODY
     });
     const emailTemplateId = await seedTemplate({
       name: DEFAULT_ABANDONED_EMAIL_TEMPLATE_NAME,
       channel: "email",
-      subject: DEFAULT_ABANDONED_EMAIL_SUBJECT,
-      body: DEFAULT_ABANDONED_EMAIL_BODY
+      subject: legacy ? DEFAULT_ABANDONED_EMAIL_SUBJECT : GENERIC_ABANDONED_EMAIL_SUBJECT,
+      body: legacy ? DEFAULT_ABANDONED_EMAIL_BODY : GENERIC_ABANDONED_EMAIL_BODY
     });
     await tx.insert(automationsTable).values({
       organizationId,
@@ -51733,16 +52571,17 @@ async function cancelAppointmentReminders(organizationId, appointmentId) {
   ).returning({ id: scheduledActionsTable.id });
   return cancelled.length;
 }
-var APPOINTMENT_REMINDER_EVENT, schedulerTimer, UPLOAD_CLEANUP_INTERVAL_MS, DEFAULT_ABANDONED_FOLLOWUP_NAME, DEFAULT_ABANDONED_FOLLOWUP_SEED_KEY, DEFAULT_ABANDONED_SMS_TEMPLATE_NAME, lastUploadCleanupAt, DEFAULT_ABANDONED_EMAIL_TEMPLATE_NAME, DEFAULT_ABANDONED_SMS_BODY, DEFAULT_ABANDONED_EMAIL_SUBJECT, DEFAULT_ABANDONED_EMAIL_BODY;
+var APPOINTMENT_REMINDER_EVENT, schedulerTimer, UPLOAD_CLEANUP_INTERVAL_MS, DEFAULT_ABANDONED_FOLLOWUP_NAME, DEFAULT_ABANDONED_FOLLOWUP_SEED_KEY, DEFAULT_ABANDONED_SMS_TEMPLATE_NAME, lastUploadCleanupAt, DEFAULT_ABANDONED_EMAIL_TEMPLATE_NAME, DEFAULT_ABANDONED_SMS_BODY, DEFAULT_ABANDONED_EMAIL_SUBJECT, DEFAULT_ABANDONED_EMAIL_BODY, GENERIC_ABANDONED_SMS_BODY, GENERIC_ABANDONED_EMAIL_SUBJECT, GENERIC_ABANDONED_EMAIL_BODY;
 var init_automation = __esm({
   "src/services/automation.ts"() {
     "use strict";
-    init_client_config();
     init_src();
     init_drizzle_orm();
     init_audit2();
+    init_orgFlavor();
     init_playbooks2();
     init_playbook_learning2();
+    init_post_sale();
     init_providers();
     init_send_gate();
     init_settings2();
@@ -51758,6 +52597,9 @@ var init_automation = __esm({
     DEFAULT_ABANDONED_SMS_BODY = "Hi {{contact.firstName}}, this is {{business.name}} \u2014 looks like we got disconnected. Still want help with your roof? Pick up right where you left off, or call us at {{business.phone}} to schedule your free inspection.";
     DEFAULT_ABANDONED_EMAIL_SUBJECT = "Still there? Let's finish your roof assessment";
     DEFAULT_ABANDONED_EMAIL_BODY = "Hi {{contact.firstName}},\n\nIt looks like we got disconnected while going over your roof concern. We'd hate for a small issue to turn into a big one \u2014 you can pick up your assessment right where you left off, or call {{business.phone}} and we'll get your free inspection on the calendar.\n\n\u2014 {{business.name}}";
+    GENERIC_ABANDONED_SMS_BODY = "Hi {{contact.firstName}}, this is {{business.name}} \u2014 looks like we got disconnected. Still want a hand? Pick up right where you left off, or call us at {{business.phone}} and we'll get you scheduled.";
+    GENERIC_ABANDONED_EMAIL_SUBJECT = "Still there? Let's pick up where we left off";
+    GENERIC_ABANDONED_EMAIL_BODY = "Hi {{contact.firstName}},\n\nIt looks like we got disconnected while going over your request. You can pick up right where you left off, or call {{business.phone}} and we'll get you on the calendar.\n\n\u2014 {{business.name}}";
   }
 });
 
@@ -56298,13 +57140,13 @@ var require_lib6 = __commonJS({
 init_src();
 
 // src/app.ts
-var import_express30 = __toESM(require_express2(), 1);
+var import_express34 = __toESM(require_express2(), 1);
 var import_cookie_parser = __toESM(require_cookie_parser(), 1);
 var import_cors = __toESM(require_lib5(), 1);
 var import_pino_http = __toESM(require_logger(), 1);
 
 // src/routes/index.ts
-var import_express29 = __toESM(require_express2(), 1);
+var import_express33 = __toESM(require_express2(), 1);
 
 // ../../lib/api-zod/src/generated/api.ts
 import * as zod from "zod";
@@ -56879,6 +57721,10 @@ var ListLeadsResponseItem = zod.object({
   "scoreReasons": zod.array(zod.string()),
   "summary": zod.string().nullish(),
   "estimatedValueCents": zod.int().nullish(),
+  "lostReason": zod.string().nullish(),
+  "wonAt": zod.coerce.date().nullish(),
+  "wonRevenueCents": zod.int().nullish(),
+  "wonAttribution": zod.string().nullish().describe("Honest revenue-attribution category recorded at win time (directly_attributed | assisted | self_reported | estimated | unknown)."),
   "hasUnreadPortalMessage": zod.boolean().optional().describe("True when the homeowner has sent a portal_message more recently than the last team_message reply (list endpoints only)."),
   "photoCount": zod.int().optional().describe("Total number of photos attached across all photos_attached activities (list endpoints only)."),
   "createdAt": zod.coerce.date(),
@@ -56920,6 +57766,10 @@ var CreateLeadResponse = zod.object({
   "scoreReasons": zod.array(zod.string()),
   "summary": zod.string().nullish(),
   "estimatedValueCents": zod.int().nullish(),
+  "lostReason": zod.string().nullish(),
+  "wonAt": zod.coerce.date().nullish(),
+  "wonRevenueCents": zod.int().nullish(),
+  "wonAttribution": zod.string().nullish().describe("Honest revenue-attribution category recorded at win time (directly_attributed | assisted | self_reported | estimated | unknown)."),
   "hasUnreadPortalMessage": zod.boolean().optional().describe("True when the homeowner has sent a portal_message more recently than the last team_message reply (list endpoints only)."),
   "photoCount": zod.int().optional().describe("Total number of photos attached across all photos_attached activities (list endpoints only)."),
   "createdAt": zod.coerce.date(),
@@ -56973,6 +57823,10 @@ var MergeLeadResponse = zod.object({
   "scoreReasons": zod.array(zod.string()),
   "summary": zod.string().nullish(),
   "estimatedValueCents": zod.int().nullish(),
+  "lostReason": zod.string().nullish(),
+  "wonAt": zod.coerce.date().nullish(),
+  "wonRevenueCents": zod.int().nullish(),
+  "wonAttribution": zod.string().nullish().describe("Honest revenue-attribution category recorded at win time (directly_attributed | assisted | self_reported | estimated | unknown)."),
   "hasUnreadPortalMessage": zod.boolean().optional().describe("True when the homeowner has sent a portal_message more recently than the last team_message reply (list endpoints only)."),
   "photoCount": zod.int().optional().describe("Total number of photos attached across all photos_attached activities (list endpoints only)."),
   "createdAt": zod.coerce.date(),
@@ -57026,6 +57880,10 @@ var GetLeadResponse = zod.object({
   "scoreReasons": zod.array(zod.string()),
   "summary": zod.string().nullish(),
   "estimatedValueCents": zod.int().nullish(),
+  "lostReason": zod.string().nullish(),
+  "wonAt": zod.coerce.date().nullish(),
+  "wonRevenueCents": zod.int().nullish(),
+  "wonAttribution": zod.string().nullish().describe("Honest revenue-attribution category recorded at win time (directly_attributed | assisted | self_reported | estimated | unknown)."),
   "hasUnreadPortalMessage": zod.boolean().optional().describe("True when the homeowner has sent a portal_message more recently than the last team_message reply (list endpoints only)."),
   "photoCount": zod.int().optional().describe("Total number of photos attached across all photos_attached activities (list endpoints only)."),
   "createdAt": zod.coerce.date(),
@@ -57043,7 +57901,8 @@ var UpdateLeadBody = zod.object({
   "source": zod.string().nullish(),
   "sourceDetail": zod.string().nullish(),
   "summary": zod.string().nullish(),
-  "estimatedValueCents": zod.int().nullish()
+  "estimatedValueCents": zod.int().nullish(),
+  "lostReason": zod.string().nullish()
 });
 var UpdateLeadResponse = zod.object({
   "id": zod.uuid(),
@@ -57068,6 +57927,10 @@ var UpdateLeadResponse = zod.object({
   "scoreReasons": zod.array(zod.string()),
   "summary": zod.string().nullish(),
   "estimatedValueCents": zod.int().nullish(),
+  "lostReason": zod.string().nullish(),
+  "wonAt": zod.coerce.date().nullish(),
+  "wonRevenueCents": zod.int().nullish(),
+  "wonAttribution": zod.string().nullish().describe("Honest revenue-attribution category recorded at win time (directly_attributed | assisted | self_reported | estimated | unknown)."),
   "hasUnreadPortalMessage": zod.boolean().optional().describe("True when the homeowner has sent a portal_message more recently than the last team_message reply (list endpoints only)."),
   "photoCount": zod.int().optional().describe("Total number of photos attached across all photos_attached activities (list endpoints only)."),
   "createdAt": zod.coerce.date(),
@@ -57811,6 +58674,111 @@ var ListLeadConversationsResponseItem = zod.object({
   }))
 });
 var ListLeadConversationsResponse = zod.array(ListLeadConversationsResponseItem);
+var GetRoiReportQueryParams = zod.object({
+  "days": zod.coerce.number().int().optional()
+});
+var GetRoiReportResponse = zod.object({
+  "windowDays": zod.int(),
+  "generatedAt": zod.coerce.date(),
+  "leads": zod.object({
+    "total": zod.int(),
+    "qualified": zod.int(),
+    "bySource": zod.array(zod.object({
+      "key": zod.string(),
+      "count": zod.int()
+    })),
+    "byCampaign": zod.array(zod.object({
+      "key": zod.string(),
+      "count": zod.int()
+    })),
+    "byTool": zod.array(zod.object({
+      "key": zod.string(),
+      "count": zod.int()
+    })),
+    "byLandingPage": zod.array(zod.object({
+      "key": zod.string(),
+      "count": zod.int()
+    })),
+    "byServiceType": zod.array(zod.object({
+      "key": zod.string(),
+      "count": zod.int()
+    }))
+  }),
+  "appointments": zod.object({
+    "total": zod.int(),
+    "leadsWithAppointment": zod.int(),
+    "appointmentRatePct": zod.int().nullish()
+  }),
+  "responsiveness": zod.object({
+    "leadsContacted": zod.int(),
+    "leadsReplied": zod.int(),
+    "responseRatePct": zod.int().nullish(),
+    "medianMinutesToFirstTouch": zod.int().nullish()
+  }),
+  "playbooks": zod.array(zod.object({
+    "playbookId": zod.string(),
+    "name": zod.string(),
+    "kind": zod.string(),
+    "sent": zod.int(),
+    "replied": zod.int(),
+    "booked": zod.int(),
+    "won": zod.int()
+  })),
+  "reviewsAndReferrals": zod.object({
+    "reviewRequestsSent": zod.int(),
+    "reviewLinkClicks": zod.int(),
+    "referralRequestsSent": zod.int(),
+    "referralSubmissions": zod.int(),
+    "referralLeads": zod.int()
+  }),
+  "reactivation": zod.object({
+    "campaignsLaunched": zod.int(),
+    "leadsEnrolled": zod.int(),
+    "leadsReplied": zod.int()
+  }),
+  "outcomes": zod.object({
+    "won": zod.int(),
+    "revenueWonCents": zod.int(),
+    "revenueByAttribution": zod.array(zod.object({
+      "category": zod.string(),
+      "count": zod.int(),
+      "revenueCents": zod.int()
+    })),
+    "pipelineValueCents": zod.int(),
+    "lost": zod.int(),
+    "lostReasons": zod.array(zod.object({
+      "key": zod.string(),
+      "count": zod.int()
+    }))
+  })
+});
+var ExportRoiReportQueryParams = zod.object({
+  "days": zod.coerce.number().int().optional()
+});
+var ExportRoiReportResponse = zod.unknown();
+var GetReferralLinkInfoParams = zod.object({
+  "token": zod.coerce.string()
+});
+var GetReferralLinkInfoResponse = zod.object({
+  "businessName": zod.string()
+});
+var SubmitReferralParams = zod.object({
+  "token": zod.coerce.string()
+});
+var SubmitReferralBody = zod.object({
+  "name": zod.string(),
+  "email": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "notes": zod.string().nullish()
+});
+var SubmitReferralResponse = zod.object({
+  "ok": zod.boolean(),
+  "leadId": zod.string()
+});
+var FollowEngagementLinkParams = zod.object({
+  "token": zod.coerce.string()
+});
+var FollowEngagementLinkResponse = zod.void();
 var TrackAnalyticsEventBody = zod.object({
   "eventName": zod.string().min(1),
   "anonymousId": zod.string().optional(),
@@ -58024,6 +58992,10 @@ var GetSettingsResponse = zod.object({
     "days": zod.array(zod.string()).describe("Days sends are allowed (Mon..Sun)."),
     "maxTouchesPerDay": zod.int().describe("Max automated touches per contact per rolling 24h (0 = unlimited).")
   }).describe("Quiet hours and frequency caps for automated outreach (playbooks + automation email/SMS). Quiet hours defer sends into the next allowed window; they never drop them."), zod.null()]).optional(),
+  "playbookStageBehaviors": zod.union([zod.record(zod.string(), zod.object({
+    "action": zod.enum(["continue", "pause", "complete", "cancel", "enroll"]),
+    "enrollPlaybookId": zod.string().nullish().describe('Target playbook to hand the lead to (only for action "enroll").')
+  })).describe("Lead pipeline stage \u2192 what happens to the lead's live acquisition playbook enrollment when it enters that stage. Missing stages use the built-in defaults (outreach stages continue; everything else completes)."), zod.null()]).optional(),
   "updatedAt": zod.string().optional()
 });
 var updateSettingsBodyAiInstructionsMax = 4e3;
@@ -58122,7 +59094,11 @@ var UpdateSettingsBody = zod.object({
     "endHour": zod.int().describe("Exclusive end hour (1-24) of the allowed sending window."),
     "days": zod.array(zod.string()).describe("Days sends are allowed (Mon..Sun)."),
     "maxTouchesPerDay": zod.int().describe("Max automated touches per contact per rolling 24h (0 = unlimited).")
-  }).optional().describe("Quiet hours and frequency caps for automated outreach (playbooks + automation email/SMS). Quiet hours defer sends into the next allowed window; they never drop them.")
+  }).optional().describe("Quiet hours and frequency caps for automated outreach (playbooks + automation email/SMS). Quiet hours defer sends into the next allowed window; they never drop them."),
+  "playbookStageBehaviors": zod.record(zod.string(), zod.object({
+    "action": zod.enum(["continue", "pause", "complete", "cancel", "enroll"]),
+    "enrollPlaybookId": zod.string().nullish().describe('Target playbook to hand the lead to (only for action "enroll").')
+  })).optional().describe("Lead pipeline stage \u2192 what happens to the lead's live acquisition playbook enrollment when it enters that stage. Missing stages use the built-in defaults (outreach stages continue; everything else completes).")
 });
 var UpdateSettingsResponse = zod.object({
   "id": zod.uuid(),
@@ -58222,6 +59198,10 @@ var UpdateSettingsResponse = zod.object({
     "days": zod.array(zod.string()).describe("Days sends are allowed (Mon..Sun)."),
     "maxTouchesPerDay": zod.int().describe("Max automated touches per contact per rolling 24h (0 = unlimited).")
   }).describe("Quiet hours and frequency caps for automated outreach (playbooks + automation email/SMS). Quiet hours defer sends into the next allowed window; they never drop them."), zod.null()]).optional(),
+  "playbookStageBehaviors": zod.union([zod.record(zod.string(), zod.object({
+    "action": zod.enum(["continue", "pause", "complete", "cancel", "enroll"]),
+    "enrollPlaybookId": zod.string().nullish().describe('Target playbook to hand the lead to (only for action "enroll").')
+  })).describe("Lead pipeline stage \u2192 what happens to the lead's live acquisition playbook enrollment when it enters that stage. Missing stages use the built-in defaults (outreach stages continue; everything else completes)."), zod.null()]).optional(),
   "updatedAt": zod.string().optional()
 });
 var GetInspectionAvailabilityResponse = zod.object({
@@ -58380,12 +59360,15 @@ var ListPlaybooksResponseItem = zod.object({
   "id": zod.uuid(),
   "name": zod.string(),
   "seedKey": zod.string().nullish(),
+  "category": zod.enum(["acquisition", "estimate_follow_up", "reactivation", "review_request", "referral"]).optional().describe("What kind of sequence this is; a lead can hold at most one live enrollment per category, so differently-categorized playbooks may run concurrently."),
+  "kind": zod.enum(["outreach", "post_sale"]).optional(),
   "isActive": zod.boolean(),
   "enrollmentRules": zod.object({
     "minScore": zod.number().nullish(),
     "urgencies": zod.array(zod.string()).optional(),
     "serviceTypes": zod.array(zod.string()).optional(),
-    "sources": zod.array(zod.string()).optional()
+    "sources": zod.array(zod.string()).optional(),
+    "milestoneStatuses": zod.array(zod.string()).optional().describe("Post-sale milestone gating \u2014 enroll only when the lead reaches one of these statuses.")
   }),
   "steps": zod.array(zod.object({
     "channel": zod.enum(["email", "sms"]),
@@ -58397,19 +59380,22 @@ var ListPlaybooksResponseItem = zod.object({
       "prompt": zod.string(),
       "subject": zod.string().optional()
     })).optional(),
-    "pinnedVariant": zod.string().optional()
+    "pinnedVariant": zod.string().optional(),
+    "linkKind": zod.enum(["review", "referral"]).optional().describe("Appends the contact's tokenized review/referral engagement link to the message.")
   })),
   "updatedAt": zod.string().optional()
 });
 var ListPlaybooksResponse = zod.array(ListPlaybooksResponseItem);
 var CreatePlaybookBody = zod.object({
   "name": zod.string().min(1),
+  "category": zod.enum(["acquisition", "estimate_follow_up", "reactivation", "review_request", "referral"]).optional().describe("What kind of sequence this is; a lead can hold at most one live enrollment per category, so differently-categorized playbooks may run concurrently."),
   "isActive": zod.boolean().optional(),
   "enrollmentRules": zod.object({
     "minScore": zod.number().nullish(),
     "urgencies": zod.array(zod.string()).optional(),
     "serviceTypes": zod.array(zod.string()).optional(),
-    "sources": zod.array(zod.string()).optional()
+    "sources": zod.array(zod.string()).optional(),
+    "milestoneStatuses": zod.array(zod.string()).optional().describe("Post-sale milestone gating \u2014 enroll only when the lead reaches one of these statuses.")
   }).optional(),
   "steps": zod.array(zod.object({
     "channel": zod.enum(["email", "sms"]),
@@ -58421,19 +59407,23 @@ var CreatePlaybookBody = zod.object({
       "prompt": zod.string(),
       "subject": zod.string().optional()
     })).optional(),
-    "pinnedVariant": zod.string().optional()
+    "pinnedVariant": zod.string().optional(),
+    "linkKind": zod.enum(["review", "referral"]).optional().describe("Appends the contact's tokenized review/referral engagement link to the message.")
   }))
 });
 var CreatePlaybookResponse = zod.object({
   "id": zod.uuid(),
   "name": zod.string(),
   "seedKey": zod.string().nullish(),
+  "category": zod.enum(["acquisition", "estimate_follow_up", "reactivation", "review_request", "referral"]).optional().describe("What kind of sequence this is; a lead can hold at most one live enrollment per category, so differently-categorized playbooks may run concurrently."),
+  "kind": zod.enum(["outreach", "post_sale"]).optional(),
   "isActive": zod.boolean(),
   "enrollmentRules": zod.object({
     "minScore": zod.number().nullish(),
     "urgencies": zod.array(zod.string()).optional(),
     "serviceTypes": zod.array(zod.string()).optional(),
-    "sources": zod.array(zod.string()).optional()
+    "sources": zod.array(zod.string()).optional(),
+    "milestoneStatuses": zod.array(zod.string()).optional().describe("Post-sale milestone gating \u2014 enroll only when the lead reaches one of these statuses.")
   }),
   "steps": zod.array(zod.object({
     "channel": zod.enum(["email", "sms"]),
@@ -58445,7 +59435,8 @@ var CreatePlaybookResponse = zod.object({
       "prompt": zod.string(),
       "subject": zod.string().optional()
     })).optional(),
-    "pinnedVariant": zod.string().optional()
+    "pinnedVariant": zod.string().optional(),
+    "linkKind": zod.enum(["review", "referral"]).optional().describe("Appends the contact's tokenized review/referral engagement link to the message.")
   })),
   "updatedAt": zod.string().optional()
 });
@@ -58454,12 +59445,14 @@ var UpdatePlaybookParams = zod.object({
 });
 var UpdatePlaybookBody = zod.object({
   "name": zod.string().min(1).optional(),
+  "category": zod.enum(["acquisition", "estimate_follow_up", "reactivation", "review_request", "referral"]).optional().describe("What kind of sequence this is; a lead can hold at most one live enrollment per category, so differently-categorized playbooks may run concurrently."),
   "isActive": zod.boolean().optional(),
   "enrollmentRules": zod.object({
     "minScore": zod.number().nullish(),
     "urgencies": zod.array(zod.string()).optional(),
     "serviceTypes": zod.array(zod.string()).optional(),
-    "sources": zod.array(zod.string()).optional()
+    "sources": zod.array(zod.string()).optional(),
+    "milestoneStatuses": zod.array(zod.string()).optional().describe("Post-sale milestone gating \u2014 enroll only when the lead reaches one of these statuses.")
   }).optional(),
   "steps": zod.array(zod.object({
     "channel": zod.enum(["email", "sms"]),
@@ -58471,19 +59464,23 @@ var UpdatePlaybookBody = zod.object({
       "prompt": zod.string(),
       "subject": zod.string().optional()
     })).optional(),
-    "pinnedVariant": zod.string().optional()
+    "pinnedVariant": zod.string().optional(),
+    "linkKind": zod.enum(["review", "referral"]).optional().describe("Appends the contact's tokenized review/referral engagement link to the message.")
   })).optional()
 });
 var UpdatePlaybookResponse = zod.object({
   "id": zod.uuid(),
   "name": zod.string(),
   "seedKey": zod.string().nullish(),
+  "category": zod.enum(["acquisition", "estimate_follow_up", "reactivation", "review_request", "referral"]).optional().describe("What kind of sequence this is; a lead can hold at most one live enrollment per category, so differently-categorized playbooks may run concurrently."),
+  "kind": zod.enum(["outreach", "post_sale"]).optional(),
   "isActive": zod.boolean(),
   "enrollmentRules": zod.object({
     "minScore": zod.number().nullish(),
     "urgencies": zod.array(zod.string()).optional(),
     "serviceTypes": zod.array(zod.string()).optional(),
-    "sources": zod.array(zod.string()).optional()
+    "sources": zod.array(zod.string()).optional(),
+    "milestoneStatuses": zod.array(zod.string()).optional().describe("Post-sale milestone gating \u2014 enroll only when the lead reaches one of these statuses.")
   }),
   "steps": zod.array(zod.object({
     "channel": zod.enum(["email", "sms"]),
@@ -58495,7 +59492,8 @@ var UpdatePlaybookResponse = zod.object({
       "prompt": zod.string(),
       "subject": zod.string().optional()
     })).optional(),
-    "pinnedVariant": zod.string().optional()
+    "pinnedVariant": zod.string().optional(),
+    "linkKind": zod.enum(["review", "referral"]).optional().describe("Appends the contact's tokenized review/referral engagement link to the message.")
   })),
   "updatedAt": zod.string().optional()
 });
@@ -59151,11 +60149,188 @@ var GetPortalPhotoHeader = zod.object({
   "x-portal-token": zod.string().describe("Opaque homeowner portal session token.")
 });
 var GetPortalPhotoResponse = zod.unknown();
+var ListCaptureEndpointsResponseItem = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "token": zod.string(),
+  "mapping": zod.record(zod.string(), zod.string()).describe("External payload field name -> MogulForge lead field name"),
+  "defaultSource": zod.string(),
+  "isActive": zod.boolean(),
+  "lastReceivedAt": zod.string().nullish(),
+  "receivedCount": zod.number(),
+  "createdAt": zod.string(),
+  "url": zod.string().optional().describe("Full inbound POST URL for this endpoint"),
+  "embedSnippet": zod.string().optional().describe("Paste-in script tag for the site form listener")
+});
+var ListCaptureEndpointsResponse = zod.array(ListCaptureEndpointsResponseItem);
+var CreateCaptureEndpointBody = zod.object({
+  "name": zod.string(),
+  "mapping": zod.record(zod.string(), zod.string()).describe("External payload field name -> MogulForge lead field name"),
+  "defaultSource": zod.string().optional()
+});
+var CreateCaptureEndpointResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "token": zod.string(),
+  "mapping": zod.record(zod.string(), zod.string()).describe("External payload field name -> MogulForge lead field name"),
+  "defaultSource": zod.string(),
+  "isActive": zod.boolean(),
+  "lastReceivedAt": zod.string().nullish(),
+  "receivedCount": zod.number(),
+  "createdAt": zod.string(),
+  "url": zod.string().optional().describe("Full inbound POST URL for this endpoint"),
+  "embedSnippet": zod.string().optional().describe("Paste-in script tag for the site form listener")
+});
+var UpdateCaptureEndpointParams = zod.object({
+  "id": zod.uuid()
+});
+var UpdateCaptureEndpointBody = zod.object({
+  "name": zod.string().optional(),
+  "mapping": zod.record(zod.string(), zod.string()).optional().describe("External payload field name -> MogulForge lead field name"),
+  "defaultSource": zod.string().optional(),
+  "isActive": zod.boolean().optional()
+});
+var UpdateCaptureEndpointResponse = zod.object({
+  "id": zod.string(),
+  "name": zod.string(),
+  "token": zod.string(),
+  "mapping": zod.record(zod.string(), zod.string()).describe("External payload field name -> MogulForge lead field name"),
+  "defaultSource": zod.string(),
+  "isActive": zod.boolean(),
+  "lastReceivedAt": zod.string().nullish(),
+  "receivedCount": zod.number(),
+  "createdAt": zod.string(),
+  "url": zod.string().optional().describe("Full inbound POST URL for this endpoint"),
+  "embedSnippet": zod.string().optional().describe("Paste-in script tag for the site form listener")
+});
+var DeleteCaptureEndpointParams = zod.object({
+  "id": zod.uuid()
+});
+var DeleteCaptureEndpointResponse = zod.void();
+var PreviewCaptureMappingBody = zod.object({
+  "mapping": zod.record(zod.string(), zod.string()).describe("External payload field name -> MogulForge lead field name"),
+  "payload": zod.record(zod.string(), zod.unknown())
+});
+var PreviewCaptureMappingResponse = zod.object({
+  "firstName": zod.string().nullish(),
+  "lastName": zod.string().nullish(),
+  "email": zod.string().nullish(),
+  "phone": zod.string().nullish(),
+  "addressLine1": zod.string().nullish(),
+  "city": zod.string().nullish(),
+  "state": zod.string().nullish(),
+  "postalCode": zod.string().nullish(),
+  "message": zod.string().nullish(),
+  "source": zod.string().nullish(),
+  "campaign": zod.string().nullish(),
+  "externalId": zod.string().nullish(),
+  "unmapped": zod.array(zod.string())
+});
+var ListCaptureDeliveriesQueryParams = zod.object({
+  "endpointId": zod.coerce.string().optional()
+});
+var ListCaptureDeliveriesResponseItem = zod.object({
+  "id": zod.string(),
+  "endpointId": zod.string(),
+  "idempotencyKey": zod.string().nullish(),
+  "leadId": zod.string().nullish(),
+  "outcome": zod.string(),
+  "detail": zod.string().nullish(),
+  "createdAt": zod.string()
+});
+var ListCaptureDeliveriesResponse = zod.array(ListCaptureDeliveriesResponseItem);
 var LogoutPortalSessionHeader = zod.object({
   "x-portal-token": zod.string().describe("Opaque homeowner portal session token.")
 });
 var LogoutPortalSessionResponse = zod.object({
   "ok": zod.boolean()
+});
+var GetSessionResponse = zod.object({
+  "id": zod.string(),
+  "email": zod.string().nullish(),
+  "firstName": zod.string().nullish(),
+  "lastName": zod.string().nullish(),
+  "role": zod.string(),
+  "isPlatformAdmin": zod.boolean(),
+  "organization": zod.object({
+    "id": zod.string(),
+    "name": zod.string(),
+    "slug": zod.string(),
+    "timezone": zod.string()
+  }).nullish()
+});
+var CreateOrgBody = zod.object({
+  "name": zod.string(),
+  "slug": zod.string().optional(),
+  "timezone": zod.string().optional()
+});
+var CreateOrgResponse = zod.object({
+  "organization": zod.object({
+    "id": zod.string(),
+    "name": zod.string(),
+    "slug": zod.string(),
+    "timezone": zod.string()
+  }),
+  "joined": zod.boolean().optional()
+});
+var ListPlatformOrgsResponse = zod.object({
+  "organizations": zod.array(zod.object({
+    "id": zod.string(),
+    "name": zod.string(),
+    "slug": zod.string(),
+    "timezone": zod.string(),
+    "createdAt": zod.string(),
+    "memberCount": zod.number()
+  }))
+});
+var UpdatePlatformOrgParams = zod.object({
+  "id": zod.coerce.string()
+});
+var UpdatePlatformOrgBody = zod.object({
+  "name": zod.string().optional(),
+  "timezone": zod.string().optional()
+});
+var UpdatePlatformOrgResponse = zod.object({
+  "organization": zod.object({
+    "id": zod.string(),
+    "name": zod.string(),
+    "slug": zod.string(),
+    "timezone": zod.string()
+  }),
+  "joined": zod.boolean().optional()
+});
+var GetOnboardingResponse = zod.object({
+  "steps": zod.array(zod.string()),
+  "state": zod.object({
+    "completedSteps": zod.array(zod.string()),
+    "currentStep": zod.string().optional(),
+    "completedAt": zod.string().nullish(),
+    "dismissedAt": zod.string().nullish()
+  })
+});
+var UpdateOnboardingBody = zod.object({
+  "completeSteps": zod.array(zod.string()).optional(),
+  "currentStep": zod.string().optional(),
+  "launched": zod.boolean().optional(),
+  "dismissed": zod.boolean().optional()
+});
+var UpdateOnboardingResponse = zod.object({
+  "steps": zod.array(zod.string()),
+  "state": zod.object({
+    "completedSteps": zod.array(zod.string()),
+    "currentStep": zod.string().optional(),
+    "completedAt": zod.string().nullish(),
+    "dismissedAt": zod.string().nullish()
+  })
+});
+var CreateOnboardingTestLeadResponse = zod.object({
+  "leadId": zod.string(),
+  "contactId": zod.string(),
+  "score": zod.number(),
+  "enrolled": zod.boolean()
+});
+var DeleteOnboardingTestLeadResponse = zod.object({
+  "removed": zod.number()
 });
 
 // src/routes/auth.ts
@@ -60686,7 +61861,145 @@ var retry = /* @__PURE__ */ Symbol();
 init_src();
 init_drizzle_orm();
 init_automation();
+init_playbooks2();
+
+// src/services/installation.ts
+init_src();
+init_drizzle_orm();
+import { randomBytes as randomBytes5 } from "node:crypto";
+function generatePublicKey() {
+  return `mfi_${randomBytes5(18).toString("hex")}`;
+}
+async function getActiveInstallationKey(organizationId) {
+  const [existing] = await db.select().from(installationKeysTable).where(
+    and(
+      eq(installationKeysTable.organizationId, organizationId),
+      eq(installationKeysTable.isActive, true)
+    )
+  );
+  if (existing) return existing;
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`installation-key:${organizationId}`}))`
+    );
+    const [raced] = await tx.select().from(installationKeysTable).where(
+      and(
+        eq(installationKeysTable.organizationId, organizationId),
+        eq(installationKeysTable.isActive, true)
+      )
+    );
+    if (raced) return raced;
+    const [created] = await tx.insert(installationKeysTable).values({ organizationId, publicKey: generatePublicKey() }).returning();
+    return created;
+  });
+}
+async function rotateInstallationKey(organizationId) {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`installation-key:${organizationId}`}))`
+    );
+    await tx.update(installationKeysTable).set({ isActive: false, revokedAt: /* @__PURE__ */ new Date() }).where(
+      and(
+        eq(installationKeysTable.organizationId, organizationId),
+        eq(installationKeysTable.isActive, true)
+      )
+    );
+    const [created] = await tx.insert(installationKeysTable).values({ organizationId, publicKey: generatePublicKey() }).returning();
+    return created;
+  });
+}
+async function recordHeartbeat(keyId, info) {
+  await db.update(installationKeysTable).set({
+    lastSeenAt: /* @__PURE__ */ new Date(),
+    lastSeenVersion: info.version?.slice(0, 20) ?? null,
+    lastSeenHost: info.host?.slice(0, 253).toLowerCase() ?? null
+  }).where(eq(installationKeysTable.id, keyId));
+}
+async function resolveInstallationKey(publicKey) {
+  if (!publicKey.startsWith("mfi_") || publicKey.length > 100) return null;
+  const [key] = await db.select().from(installationKeysTable).where(
+    and(
+      eq(installationKeysTable.publicKey, publicKey),
+      eq(installationKeysTable.isActive, true)
+    )
+  );
+  return key ?? null;
+}
+function normalizeDomain(input) {
+  let value = input.trim().toLowerCase();
+  if (!value) return null;
+  let wildcard = false;
+  if (value.startsWith("*.")) {
+    wildcard = true;
+    value = value.slice(2);
+  }
+  if (value.includes("://")) {
+    try {
+      value = new URL(value).hostname;
+    } catch {
+      return null;
+    }
+  }
+  value = value.split("/")[0].split(":")[0].replace(/\.$/, "");
+  if (!value) return null;
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(value)) {
+    return null;
+  }
+  if (wildcard && !value.includes(".")) return null;
+  return wildcard ? `*.${value}` : value;
+}
+async function listAuthorizedDomains(organizationId) {
+  return db.select().from(authorizedDomainsTable).where(eq(authorizedDomainsTable.organizationId, organizationId)).orderBy(asc(authorizedDomainsTable.createdAt));
+}
+async function addAuthorizedDomain(organizationId, rawDomain) {
+  const domain = normalizeDomain(rawDomain);
+  if (!domain) return null;
+  const [created] = await db.insert(authorizedDomainsTable).values({ organizationId, domain }).onConflictDoNothing().returning();
+  if (created) return created;
+  const [existing] = await db.select().from(authorizedDomainsTable).where(
+    and(
+      eq(authorizedDomainsTable.organizationId, organizationId),
+      eq(authorizedDomainsTable.domain, domain)
+    )
+  );
+  return existing ?? null;
+}
+async function removeAuthorizedDomain(organizationId, id) {
+  const [removed] = await db.delete(authorizedDomainsTable).where(
+    and(
+      eq(authorizedDomainsTable.id, id),
+      eq(authorizedDomainsTable.organizationId, organizationId)
+    )
+  ).returning();
+  return removed;
+}
+function isHostnameAuthorized(hostname, entries) {
+  let host = hostname.trim().toLowerCase().replace(/\.$/, "");
+  if (!host) return false;
+  if (host === "127.0.0.1" || host === "::1" || host === "[::1]") {
+    host = "localhost";
+  }
+  for (const entry of entries) {
+    if (entry.startsWith("*.")) {
+      const base = entry.slice(2);
+      if (host === base || host.endsWith(`.${base}`)) return true;
+      continue;
+    }
+    if (host === entry) return true;
+    if (host === `www.${entry}` || entry === `www.${host}`) return true;
+  }
+  return false;
+}
+async function ensureInstallation(organizationId, seedDomains) {
+  await getActiveInstallationKey(organizationId);
+  for (const raw of seedDomains) {
+    await addAuthorizedDomain(organizationId, raw);
+  }
+}
+
+// src/services/org.ts
 init_client_config();
+init_orgFlavor();
 var DEFAULT_ORG_SLUG = CLIENT.defaultOrgSlug;
 async function getDefaultOrganization() {
   const [existing] = await db.select().from(organizationsTable).where(eq(organizationsTable.slug, DEFAULT_ORG_SLUG));
@@ -60717,12 +62030,90 @@ async function ensureMembership(userId) {
       sql`select id from ${organizationsTable} where ${organizationsTable.id} = ${org.id} for update`
     );
     const [{ value: memberCount }] = await tx.select({ value: count() }).from(usersTable).where(eq(usersTable.organizationId, org.id));
-    const [updated] = await tx.update(usersTable).set({
-      organizationId: org.id,
-      role: memberCount === 0 ? "owner" : "viewer"
-    }).where(eq(usersTable.id, userId)).returning();
-    return updated;
+    if (memberCount > 0) return user;
+    const [updated] = await tx.update(usersTable).set({ organizationId: org.id, role: "owner", isPlatformAdmin: true }).where(eq(usersTable.id, userId)).returning();
+    return updated ?? user;
   });
+}
+var SLUG_RE = /^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$/;
+var RESERVED_SLUGS = /* @__PURE__ */ new Set(["api", "www", "admin", "platform", "app", "public"]);
+function slugify(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
+}
+async function createOrganization(params) {
+  const name = params.name.trim().slice(0, 120);
+  if (name.length < 2) return { error: "Company name is too short" };
+  const slug = (params.slug?.trim() || slugify(name)).toLowerCase();
+  if (!SLUG_RE.test(slug) || RESERVED_SLUGS.has(slug)) {
+    return { error: "Invalid identifier \u2014 use 3-50 lowercase letters, numbers, and hyphens" };
+  }
+  const timezone = params.timezone && isValidTimezone2(params.timezone) ? params.timezone : "America/New_York";
+  const created = await db.transaction(async (tx) => {
+    const [creator] = await tx.select().from(usersTable).where(eq(usersTable.id, params.creatorUserId));
+    if (!creator) return { error: "User not found" };
+    if (params.attachCreator && creator.organizationId) {
+      return { error: "You already belong to an organization" };
+    }
+    const [org] = await tx.insert(organizationsTable).values({ name, slug, timezone }).onConflictDoNothing().returning();
+    if (!org) return { error: "That identifier is already taken" };
+    if (params.attachCreator) {
+      await tx.update(usersTable).set({ organizationId: org.id, role: "owner" }).where(eq(usersTable.id, params.creatorUserId));
+    }
+    await tx.insert(orgSettingsTable).values({
+      organizationId: org.id,
+      businessProfile: { businessName: name },
+      services: [],
+      serviceAreas: [],
+      leadScoring: GENERIC_LEAD_SCORING,
+      appointmentReminder: GENERIC_APPOINTMENT_REMINDER,
+      concierge: GENERIC_CONCIERGE_SETTINGS,
+      onboarding: { completedSteps: [], currentStep: "company" }
+    }).onConflictDoNothing();
+    return { org };
+  });
+  if ("error" in created) return created;
+  await ensureDefaultAutomations(created.org.id).catch(
+    (err) => console.error("[org] seeding automations for new org failed:", err)
+  );
+  await ensureDefaultPlaybook(created.org.id).catch(
+    (err) => console.error("[org] seeding playbook for new org failed:", err)
+  );
+  await ensureInstallation(created.org.id, ["localhost"]).catch(
+    (err) => console.error("[org] seeding installation for new org failed:", err)
+  );
+  return {
+    org: {
+      id: created.org.id,
+      name: created.org.name,
+      slug: created.org.slug,
+      timezone: created.org.timezone
+    }
+  };
+}
+async function ensurePlatformAdmins() {
+  const [org] = await db.select({ id: organizationsTable.id }).from(organizationsTable).where(eq(organizationsTable.slug, DEFAULT_ORG_SLUG));
+  if (!org) return;
+  await db.update(usersTable).set({ isPlatformAdmin: true }).where(
+    sql`${usersTable.organizationId} = ${org.id} and ${usersTable.role} = 'owner' and ${usersTable.isPlatformAdmin} = false`
+  );
+}
+async function listAllOrganizations() {
+  return db.select({
+    id: organizationsTable.id,
+    name: organizationsTable.name,
+    slug: organizationsTable.slug,
+    timezone: organizationsTable.timezone,
+    createdAt: organizationsTable.createdAt,
+    memberCount: count(usersTable.id)
+  }).from(organizationsTable).leftJoin(usersTable, eq(usersTable.organizationId, organizationsTable.id)).groupBy(organizationsTable.id).orderBy(organizationsTable.createdAt);
+}
+function isValidTimezone2(tz) {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // src/services/security-alerts.ts
@@ -61188,7 +62579,7 @@ router2.get("/healthz", (_req, res) => {
 var health_default = router2;
 
 // src/routes/v1/index.ts
-var import_express28 = __toESM(require_express2(), 1);
+var import_express32 = __toESM(require_express2(), 1);
 
 // src/routes/v1/api-keys.ts
 var import_express3 = __toESM(require_express2(), 1);
@@ -61237,7 +62628,7 @@ init_rateLimit();
 // src/services/api-keys.ts
 init_src();
 init_drizzle_orm();
-import { createHash as createHash3, randomBytes as randomBytes4 } from "node:crypto";
+import { createHash as createHash3, randomBytes as randomBytes6 } from "node:crypto";
 function hashApiKey(key) {
   return createHash3("sha256").update(key).digest("hex");
 }
@@ -61245,7 +62636,7 @@ async function listApiKeys(organizationId) {
   return db.select().from(apiKeysTable).where(eq(apiKeysTable.organizationId, organizationId)).orderBy(desc(apiKeysTable.createdAt));
 }
 async function createApiKey(params) {
-  const key = `pk_${randomBytes4(24).toString("hex")}`;
+  const key = `pk_${randomBytes6(24).toString("hex")}`;
   const [record2] = await db.insert(apiKeysTable).values({
     organizationId: params.organizationId,
     name: params.name,
@@ -61310,6 +62701,8 @@ function toApiKeyDto(k) {
 // src/middlewares/requireMember.ts
 var INVALID_KEY_WINDOW_MS = 15 * 60 * 1e3;
 var INVALID_KEY_MAX_FAILURES = 10;
+var API_KEY_RATE_WINDOW_MS = 60 * 1e3;
+var API_KEY_RATE_MAX = 240;
 var invalidApiKeyLimiter = createFailureLimiter({
   windowMs: INVALID_KEY_WINDOW_MS,
   max: INVALID_KEY_MAX_FAILURES
@@ -61339,6 +62732,20 @@ function requireMember(permission) {
       if (permission === "settings.manage" || permission === "users.manage" || !hasPermission(resolved.key.role, permission)) {
         res.status(403).json({ error: "API key lacks this permission" });
         return;
+      }
+      try {
+        const bucket = await incrementShared(
+          `api-key-rate:${resolved.key.id}`,
+          API_KEY_RATE_WINDOW_MS
+        );
+        if (bucket.count > API_KEY_RATE_MAX) {
+          res.status(429).setHeader(
+            "Retry-After",
+            String(Math.max(1, Math.ceil((bucket.resetAt - Date.now()) / 1e3)))
+          ).json({ error: "API rate limit exceeded, slow down" });
+          return;
+        }
+      } catch {
       }
       req.member = {
         user: resolved.creator,
@@ -61521,140 +62928,6 @@ var api_keys_default = router3;
 var import_express4 = __toESM(require_express2(), 1);
 init_rateLimit();
 init_audit2();
-
-// src/services/installation.ts
-init_src();
-init_drizzle_orm();
-import { randomBytes as randomBytes5 } from "node:crypto";
-function generatePublicKey() {
-  return `mfi_${randomBytes5(18).toString("hex")}`;
-}
-async function getActiveInstallationKey(organizationId) {
-  const [existing] = await db.select().from(installationKeysTable).where(
-    and(
-      eq(installationKeysTable.organizationId, organizationId),
-      eq(installationKeysTable.isActive, true)
-    )
-  );
-  if (existing) return existing;
-  return db.transaction(async (tx) => {
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${`installation-key:${organizationId}`}))`
-    );
-    const [raced] = await tx.select().from(installationKeysTable).where(
-      and(
-        eq(installationKeysTable.organizationId, organizationId),
-        eq(installationKeysTable.isActive, true)
-      )
-    );
-    if (raced) return raced;
-    const [created] = await tx.insert(installationKeysTable).values({ organizationId, publicKey: generatePublicKey() }).returning();
-    return created;
-  });
-}
-async function rotateInstallationKey(organizationId) {
-  return db.transaction(async (tx) => {
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${`installation-key:${organizationId}`}))`
-    );
-    await tx.update(installationKeysTable).set({ isActive: false, revokedAt: /* @__PURE__ */ new Date() }).where(
-      and(
-        eq(installationKeysTable.organizationId, organizationId),
-        eq(installationKeysTable.isActive, true)
-      )
-    );
-    const [created] = await tx.insert(installationKeysTable).values({ organizationId, publicKey: generatePublicKey() }).returning();
-    return created;
-  });
-}
-async function recordHeartbeat(keyId, info) {
-  await db.update(installationKeysTable).set({
-    lastSeenAt: /* @__PURE__ */ new Date(),
-    lastSeenVersion: info.version?.slice(0, 20) ?? null,
-    lastSeenHost: info.host?.slice(0, 253).toLowerCase() ?? null
-  }).where(eq(installationKeysTable.id, keyId));
-}
-async function resolveInstallationKey(publicKey) {
-  if (!publicKey.startsWith("mfi_") || publicKey.length > 100) return null;
-  const [key] = await db.select().from(installationKeysTable).where(
-    and(
-      eq(installationKeysTable.publicKey, publicKey),
-      eq(installationKeysTable.isActive, true)
-    )
-  );
-  return key ?? null;
-}
-function normalizeDomain(input) {
-  let value = input.trim().toLowerCase();
-  if (!value) return null;
-  let wildcard = false;
-  if (value.startsWith("*.")) {
-    wildcard = true;
-    value = value.slice(2);
-  }
-  if (value.includes("://")) {
-    try {
-      value = new URL(value).hostname;
-    } catch {
-      return null;
-    }
-  }
-  value = value.split("/")[0].split(":")[0].replace(/\.$/, "");
-  if (!value) return null;
-  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(value)) {
-    return null;
-  }
-  if (wildcard && !value.includes(".")) return null;
-  return wildcard ? `*.${value}` : value;
-}
-async function listAuthorizedDomains(organizationId) {
-  return db.select().from(authorizedDomainsTable).where(eq(authorizedDomainsTable.organizationId, organizationId)).orderBy(asc(authorizedDomainsTable.createdAt));
-}
-async function addAuthorizedDomain(organizationId, rawDomain) {
-  const domain = normalizeDomain(rawDomain);
-  if (!domain) return null;
-  const [created] = await db.insert(authorizedDomainsTable).values({ organizationId, domain }).onConflictDoNothing().returning();
-  if (created) return created;
-  const [existing] = await db.select().from(authorizedDomainsTable).where(
-    and(
-      eq(authorizedDomainsTable.organizationId, organizationId),
-      eq(authorizedDomainsTable.domain, domain)
-    )
-  );
-  return existing ?? null;
-}
-async function removeAuthorizedDomain(organizationId, id) {
-  const [removed] = await db.delete(authorizedDomainsTable).where(
-    and(
-      eq(authorizedDomainsTable.id, id),
-      eq(authorizedDomainsTable.organizationId, organizationId)
-    )
-  ).returning();
-  return removed;
-}
-function isHostnameAuthorized(hostname, entries) {
-  let host = hostname.trim().toLowerCase().replace(/\.$/, "");
-  if (!host) return false;
-  if (host === "127.0.0.1" || host === "::1" || host === "[::1]") {
-    host = "localhost";
-  }
-  for (const entry of entries) {
-    if (entry.startsWith("*.")) {
-      const base = entry.slice(2);
-      if (host === base || host.endsWith(`.${base}`)) return true;
-      continue;
-    }
-    if (host === entry) return true;
-    if (host === `www.${entry}` || entry === `www.${host}`) return true;
-  }
-  return false;
-}
-async function ensureInstallation(organizationId, seedDomains) {
-  await getActiveInstallationKey(organizationId);
-  for (const raw of seedDomains) {
-    await addAuthorizedDomain(organizationId, raw);
-  }
-}
 
 // src/services/installationCheck.ts
 init_src();
@@ -61918,7 +63191,7 @@ var MAX_OPTIONS = 30;
 var MAX_TEXT_ANSWER = 4e3;
 var MAX_PHOTOS = 10;
 var KEY_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
-var SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+var SLUG_RE2 = /^[a-z0-9][a-z0-9-]{0,63}$/;
 function isUniqueViolation(err) {
   const e2 = err;
   return e2?.code === "23505" || e2?.cause?.code === "23505";
@@ -62261,7 +63534,7 @@ async function createForm(organizationId, input) {
   const name = cleanText(input.name, 200);
   const slug = cleanText(input.slug, 64)?.toLowerCase();
   if (!name) return { error: "Name is required" };
-  if (!slug || !SLUG_RE.test(slug)) return { error: "Slug must be lowercase letters, numbers, and dashes" };
+  if (!slug || !SLUG_RE2.test(slug)) return { error: "Slug must be lowercase letters, numbers, and dashes" };
   const def = sanitizeFormDefinition(input.steps, input.settings);
   if ("error" in def) return def;
   const status = input.status === "published" ? "published" : "draft";
@@ -62292,7 +63565,7 @@ async function updateForm(organizationId, id, input) {
   }
   if (input.slug !== void 0) {
     const slug = cleanText(input.slug, 64)?.toLowerCase();
-    if (!slug || !SLUG_RE.test(slug)) return { error: "Slug must be lowercase letters, numbers, and dashes" };
+    if (!slug || !SLUG_RE2.test(slug)) return { error: "Slug must be lowercase letters, numbers, and dashes" };
     patch.slug = slug;
   }
   if (input.description !== void 0) patch.description = cleanText(input.description, 500) ?? null;
@@ -63428,6 +64701,7 @@ var import_express8 = __toESM(require_express2(), 1);
 init_automation();
 
 // src/services/crm.ts
+init_webhooks2();
 init_src();
 init_drizzle_orm();
 init_automation();
@@ -64081,6 +65355,14 @@ async function updateAppointment(organizationId, id, input) {
   if (row) {
     if (row.status !== "scheduled" && row.status !== "confirmed") {
       await cancelAppointmentReminders(organizationId, row.id);
+      if (row.status === "cancelled" && existing.status !== "cancelled") {
+        void dispatchWebhookEvent(organizationId, "appointment.cancelled", {
+          appointmentId: row.id,
+          leadId: row.leadId ?? null,
+          contactId: row.contactId ?? null
+        }).catch(() => {
+        });
+      }
     } else if (input.scheduledStart !== void 0) {
       await cancelAppointmentReminders(organizationId, row.id);
       await scheduleAppointmentReminder(organizationId, row);
@@ -64633,7 +65915,6 @@ init_playbook_learning2();
 // src/services/next-best-action.ts
 init_src();
 init_drizzle_orm();
-init_client_config();
 init_providers();
 init_settings2();
 var DISMISS_TTL_HOURS = 72;
@@ -64838,7 +66119,7 @@ async function buildDraft(organizationId, action, lead) {
     return void 0;
   }
   const settings = await getOrgSettings(organizationId);
-  const businessName = settings.businessProfile.businessName ?? CLIENT.businessShortName;
+  const businessName = await getBusinessName(organizationId);
   const prompts = {
     send_message: "Personal check-in from their rep. Warm, short, one clear next step (book the free inspection or reply with questions). No pressure.",
     follow_up_estimate: "Follow-up on the estimate we already sent. Ask if they have questions and offer to walk through it. Do not restate or change any numbers.",
@@ -65012,7 +66293,6 @@ async function getCopilotPerformance(organizationId) {
 }
 
 // src/routes/v1/playbooks.ts
-init_src();
 var router10 = (0, import_express10.Router)();
 router10.get(
   "/playbook-insights",
@@ -65042,18 +66322,29 @@ router10.post(
   "/playbooks",
   requireMember("settings.manage"),
   async (req, res) => {
-    const parsed = CreatePlaybookBody.safeParse(req.body);
-    if (!parsed.success || parsed.data.steps.length === 0) {
-      res.status(400).json({ error: "Invalid playbook" });
+    const parsed = UpdatePlaybookBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid playbook update" });
       return;
     }
-    const [row] = await db.insert(playbooksTable).values({
-      organizationId: req.member.organizationId,
-      name: parsed.data.name,
-      isActive: parsed.data.isActive ?? true,
-      enrollmentRules: parsed.data.enrollmentRules ?? {},
-      steps: parsed.data.steps
-    }).returning();
+    if (parsed.data.steps && parsed.data.steps.length === 0) {
+      res.status(400).json({ error: "A playbook needs at least one step" });
+      return;
+    }
+    const [row] = await db.update(playbooksTable).set({
+      ...parsed.data.name !== void 0 ? { name: parsed.data.name } : {},
+      ...parsed.data.category !== void 0 ? { category: parsed.data.category } : {},
+      ...parsed.data.isActive !== void 0 ? { isActive: parsed.data.isActive } : {},
+      ...parsed.data.enrollmentRules !== void 0 ? {
+        enrollmentRules: parsed.data.enrollmentRules
+      } : {},
+      ...parsed.data.steps !== void 0 ? { steps: parsed.data.steps } : {}
+    }).where(
+      and(
+        eq(playbooksTable.id, String(req.params.id)),
+        eq(playbooksTable.organizationId, req.member.organizationId)
+      )
+    ).returning();
     await recordAudit({
       organizationId: req.member.organizationId,
       actorUserId: req.member.user.id,
@@ -65079,6 +66370,7 @@ router10.patch(
     }
     const [row] = await db.update(playbooksTable).set({
       ...parsed.data.name !== void 0 ? { name: parsed.data.name } : {},
+      ...parsed.data.category !== void 0 ? { category: parsed.data.category } : {},
       ...parsed.data.isActive !== void 0 ? { isActive: parsed.data.isActive } : {},
       ...parsed.data.enrollmentRules !== void 0 ? {
         enrollmentRules: parsed.data.enrollmentRules
@@ -65112,40 +66404,8 @@ router10.get(
       req.member.organizationId,
       String(req.params.id)
     );
-    res.json({ enrollment });
-  }
-);
-router10.post(
-  "/enrollments/:id/pause",
-  requireMember("crm.write"),
-  async (req, res) => {
     const organizationId = req.member.organizationId;
-    const id = String(req.params.id);
-    const [enrollment] = await db.select().from(playbookEnrollmentsTable).where(
-      and(
-        eq(playbookEnrollmentsTable.id, id),
-        eq(playbookEnrollmentsTable.organizationId, organizationId)
-      )
-    );
-    if (!enrollment || enrollment.status !== "active") {
-      res.status(404).json({ error: "No active enrollment to pause" });
-      return;
-    }
-    await stopEnrollmentsForLead(
-      organizationId,
-      enrollment.leadId,
-      `paused by ${req.member.user.firstName ?? "a teammate"}`,
-      "paused"
-    );
-    const [updated] = await db.select().from(playbookEnrollmentsTable).where(eq(playbookEnrollmentsTable.id, id));
-    res.json(updated);
-  }
-);
-router10.post(
-  "/enrollments/:id/resume",
-  requireMember("crm.write"),
-  async (req, res) => {
-    const updated = await resumeEnrollment(
+    const updated = await skipEnrollmentStep(
       req.member.organizationId,
       String(req.params.id)
     );
@@ -65322,14 +66582,419 @@ for (const action of ["pause", "resume", "cancel"]) {
 }
 var reactivation_default = router11;
 
-// src/routes/v1/contacts.ts
+// src/routes/v1/capture.ts
 var import_express12 = __toESM(require_express2(), 1);
 init_audit2();
+
+// src/services/capture.ts
+init_src();
+init_drizzle_orm();
+init_automation();
+init_attribution();
+import { randomBytes as randomBytes7 } from "node:crypto";
+var OPEN_LEAD_STATUSES2 = ["new", "contacted", "qualified", "nurture", "follow_up"];
+function generateCaptureToken() {
+  return `cap_${randomBytes7(18).toString("hex")}`;
+}
+function sanitizeMapping(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const mapping = {};
+  for (const [external, target] of Object.entries(raw)) {
+    const ext = String(external).trim().slice(0, 200);
+    if (!ext) continue;
+    if (typeof target !== "string" || !CAPTURE_TARGET_FIELDS.includes(target)) {
+      return null;
+    }
+    mapping[ext] = target;
+  }
+  return mapping;
+}
+async function listCaptureEndpoints(organizationId) {
+  return db.select().from(captureEndpointsTable).where(eq(captureEndpointsTable.organizationId, organizationId)).orderBy(desc(captureEndpointsTable.createdAt));
+}
+async function createCaptureEndpoint(organizationId, input) {
+  const [row] = await db.insert(captureEndpointsTable).values({
+    organizationId,
+    name: input.name.trim().slice(0, 200),
+    token: generateCaptureToken(),
+    mapping: input.mapping,
+    defaultSource: (input.defaultSource?.trim() || "external-form").slice(0, 100)
+  }).returning();
+  return row;
+}
+async function updateCaptureEndpoint(organizationId, id, input) {
+  const set = {};
+  if (input.name !== void 0) set.name = input.name.trim().slice(0, 200);
+  if (input.mapping !== void 0) set.mapping = input.mapping;
+  if (input.defaultSource !== void 0) {
+    set.defaultSource = (input.defaultSource.trim() || "external-form").slice(0, 100);
+  }
+  if (input.isActive !== void 0) set.isActive = input.isActive;
+  if (Object.keys(set).length === 0) return null;
+  const [row] = await db.update(captureEndpointsTable).set(set).where(
+    and(
+      eq(captureEndpointsTable.id, id),
+      eq(captureEndpointsTable.organizationId, organizationId)
+    )
+  ).returning();
+  return row ?? null;
+}
+async function deleteCaptureEndpoint(organizationId, id) {
+  const rows = await db.update(captureEndpointsTable).set({ isActive: false }).where(
+    and(
+      eq(captureEndpointsTable.id, id),
+      eq(captureEndpointsTable.organizationId, organizationId)
+    )
+  ).returning({ id: captureEndpointsTable.id });
+  return rows.length > 0;
+}
+async function getEndpointByToken(token) {
+  const [row] = await db.select().from(captureEndpointsTable).where(and(eq(captureEndpointsTable.token, token), eq(captureEndpointsTable.isActive, true)));
+  return row ?? null;
+}
+function asText(value, max = 500) {
+  if (value === null || value === void 0) return null;
+  const s = (typeof value === "string" ? value : String(value)).trim();
+  return s ? s.slice(0, max) : null;
+}
+function applyMapping(mapping, payload) {
+  const out = {
+    firstName: null,
+    lastName: null,
+    email: null,
+    phone: null,
+    addressLine1: null,
+    city: null,
+    state: null,
+    postalCode: null,
+    message: null,
+    source: null,
+    campaign: null,
+    externalId: null,
+    unmapped: []
+  };
+  const mappedKeys = new Set(Object.keys(mapping));
+  for (const [external, target] of Object.entries(mapping)) {
+    const value = payload[external];
+    if (value === void 0) continue;
+    if (target === "fullName") {
+      const full = asText(value, 200);
+      if (full && !out.firstName) {
+        const [first, ...rest] = full.split(/\s+/);
+        out.firstName = first;
+        if (rest.length && !out.lastName) out.lastName = rest.join(" ");
+      }
+      continue;
+    }
+    if (target === "message") {
+      out.message = asText(value, 4e3);
+      continue;
+    }
+    out[target] = asText(value);
+  }
+  for (const key of Object.keys(payload)) {
+    if (!mappedKeys.has(key) && !key.startsWith("_")) out.unmapped.push(key);
+  }
+  out.unmapped = out.unmapped.slice(0, 50);
+  return out;
+}
+async function captureExternalLead(endpoint, payload, opts = {}) {
+  const organizationId = endpoint.organizationId;
+  const idempotencyKey = asText(opts.idempotencyKey, 200);
+  if (idempotencyKey) {
+    const reserved = await db.insert(captureDeliveriesTable).values({
+      organizationId,
+      endpointId: endpoint.id,
+      idempotencyKey,
+      leadId: null,
+      outcome: "pending",
+      detail: null
+    }).onConflictDoNothing().returning({ id: captureDeliveriesTable.id });
+    if (reserved.length === 0) {
+      for (let i = 0; i < 20; i++) {
+        const [existing] = await db.select().from(captureDeliveriesTable).where(
+          and(
+            eq(captureDeliveriesTable.endpointId, endpoint.id),
+            eq(captureDeliveriesTable.idempotencyKey, idempotencyKey)
+          )
+        );
+        if (!existing) break;
+        if (existing.outcome !== "pending") {
+          if (existing.outcome === "rejected" || !existing.leadId) {
+            return { ok: false, error: existing.detail ?? "rejected" };
+          }
+          return {
+            ok: true,
+            leadId: existing.leadId,
+            outcome: existing.outcome,
+            duplicateDelivery: true
+          };
+        }
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      return { ok: false, error: "Duplicate delivery still processing \u2014 retry shortly" };
+    }
+    try {
+      return await runCapture(endpoint, payload, idempotencyKey);
+    } catch (err) {
+      await db.delete(captureDeliveriesTable).where(
+        and(
+          eq(captureDeliveriesTable.endpointId, endpoint.id),
+          eq(captureDeliveriesTable.idempotencyKey, idempotencyKey),
+          eq(captureDeliveriesTable.outcome, "pending")
+        )
+      ).catch(() => {
+      });
+      throw err;
+    }
+  }
+  return runCapture(endpoint, payload, null);
+}
+async function runCapture(endpoint, payload, idempotencyKey) {
+  const organizationId = endpoint.organizationId;
+  const fields = applyMapping(endpoint.mapping, payload);
+  const email2 = fields.email?.toLowerCase() ?? null;
+  const phone = fields.phone ? fields.phone.replace(/[^\d+]/g, "") : null;
+  if (!email2 && !phone) {
+    await recordDelivery(endpoint, idempotencyKey, null, "rejected", "no email or phone after mapping");
+    return { ok: false, error: "Mapped payload has no email or phone" };
+  }
+  const source = fields.source || endpoint.defaultSource;
+  const touch = buildTouch({
+    channel: "capture",
+    source,
+    attribution: { utmCampaign: fields.campaign ?? void 0 }
+  });
+  const result = await db.transaction(async (tx) => {
+    const matchers = [];
+    if (email2) matchers.push(sql`lower(${contactsTable.email}) = ${email2}`);
+    if (phone) {
+      matchers.push(
+        sql`regexp_replace(coalesce(${contactsTable.phone}, ''), '[^0-9+]', '', 'g') = ${phone}`
+      );
+    }
+    const [existingContact] = await tx.select().from(contactsTable).where(and(eq(contactsTable.organizationId, organizationId), or(...matchers))).limit(1);
+    let contactId;
+    if (existingContact) {
+      contactId = existingContact.id;
+    } else {
+      const [contact] = await tx.insert(contactsTable).values({
+        organizationId,
+        firstName: fields.firstName ?? "Unknown",
+        lastName: fields.lastName,
+        email: fields.email,
+        phone: fields.phone
+      }).returning();
+      contactId = contact.id;
+    }
+    const [openLead] = existingContact ? await tx.select().from(leadsTable).where(
+      and(
+        eq(leadsTable.organizationId, organizationId),
+        eq(leadsTable.contactId, contactId),
+        inArray(leadsTable.status, OPEN_LEAD_STATUSES2)
+      )
+    ).limit(1) : [];
+    if (openLead) {
+      await tx.update(leadsTable).set(repeatTouchColumns({ source, touch, existing: openLead })).where(eq(leadsTable.id, openLead.id));
+      return { leadId: openLead.id, contactId, outcome: "merged" };
+    }
+    const [lead] = await tx.insert(leadsTable).values({
+      organizationId,
+      contactId,
+      status: "new",
+      summary: fields.message,
+      sourceDetail: fields.externalId,
+      ...leadAttributionColumns({ source, creationMethod: "capture", touch })
+    }).returning();
+    return { leadId: lead.id, contactId, outcome: "created" };
+  });
+  await db.insert(activitiesTable).values({
+    organizationId,
+    leadId: result.leadId,
+    contactId: result.contactId,
+    type: "lead_captured",
+    title: `Captured from "${endpoint.name}"`,
+    body: fields.message,
+    metadata: { captureEndpointId: endpoint.id, source }
+  });
+  await recordDelivery(endpoint, idempotencyKey, result.leadId, result.outcome, null);
+  await db.update(captureEndpointsTable).set({
+    lastReceivedAt: /* @__PURE__ */ new Date(),
+    receivedCount: sql`${captureEndpointsTable.receivedCount} + 1`
+  }).where(eq(captureEndpointsTable.id, endpoint.id));
+  if (result.outcome === "created") {
+    emitAutomationEvent(organizationId, "lead.created", {
+      leadId: result.leadId,
+      contactId: result.contactId,
+      fields: { "lead.status": "new", "lead.source": source }
+    });
+  }
+  return { ok: true, leadId: result.leadId, outcome: result.outcome, duplicateDelivery: false };
+}
+async function recordDelivery(endpoint, idempotencyKey, leadId, outcome, detail) {
+  try {
+    if (idempotencyKey) {
+      await db.update(captureDeliveriesTable).set({ leadId, outcome, detail }).where(
+        and(
+          eq(captureDeliveriesTable.endpointId, endpoint.id),
+          eq(captureDeliveriesTable.idempotencyKey, idempotencyKey),
+          eq(captureDeliveriesTable.outcome, "pending")
+        )
+      );
+    } else {
+      await db.insert(captureDeliveriesTable).values({
+        organizationId: endpoint.organizationId,
+        endpointId: endpoint.id,
+        idempotencyKey,
+        leadId,
+        outcome,
+        detail
+      });
+    }
+  } catch (err) {
+    console.error("[capture] failed to record delivery:", err);
+  }
+}
+async function listRecentDeliveries(organizationId, endpointId) {
+  const scope = eq(captureDeliveriesTable.organizationId, organizationId);
+  return db.select().from(captureDeliveriesTable).where(endpointId ? and(scope, eq(captureDeliveriesTable.endpointId, endpointId)) : scope).orderBy(desc(captureDeliveriesTable.createdAt)).limit(100);
+}
+
+// src/routes/v1/capture.ts
 var router12 = (0, import_express12.Router)();
+function requestBase(req) {
+  const host = req.headers["x-forwarded-host"]?.split(",")[0]?.trim() || req.headers.host || "";
+  const proto = req.headers["x-forwarded-proto"]?.split(",")[0]?.trim() || req.protocol || "https";
+  return `${proto}://${host}`;
+}
+function withShareAssets(req, endpoint) {
+  const base = requestBase(req);
+  const url2 = `${base}/api/v1/public/capture/${encodeURIComponent(endpoint.token)}`;
+  return {
+    ...endpoint,
+    url: url2,
+    embedSnippet: `<script async src="${base}/api/v1/public/capture.js" data-capture-token="${endpoint.token}" data-form-selector="form"></script>`
+  };
+}
+router12.get(
+  "/capture-endpoints",
+  requireMember("crm.read"),
+  async (req, res) => {
+    const endpoints = await listCaptureEndpoints(req.member.organizationId);
+    res.json(endpoints.map((e2) => withShareAssets(req, e2)));
+  }
+);
+router12.post(
+  "/capture-endpoints",
+  requireMember("crm.write"),
+  async (req, res) => {
+    const body = req.body ?? {};
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name) {
+      res.status(400).json({ error: "name is required" });
+      return;
+    }
+    const mapping = sanitizeMapping(body.mapping ?? {});
+    if (!mapping) {
+      res.status(400).json({ error: "mapping must map external fields to known lead fields" });
+      return;
+    }
+    const endpoint = await createCaptureEndpoint(req.member.organizationId, {
+      name,
+      mapping,
+      defaultSource: typeof body.defaultSource === "string" ? body.defaultSource : void 0
+    });
+    await recordAudit({
+      organizationId: req.member.organizationId,
+      actorUserId: req.member.user.id,
+      action: "capture_endpoint.created",
+      entityType: "capture_endpoint",
+      entityId: endpoint.id
+    });
+    res.status(201).json(withShareAssets(req, endpoint));
+  }
+);
+router12.patch(
+  "/capture-endpoints/:id",
+  requireMember("crm.write"),
+  async (req, res) => {
+    const body = req.body ?? {};
+    let mapping;
+    if (body.mapping !== void 0) {
+      mapping = sanitizeMapping(body.mapping);
+      if (!mapping) {
+        res.status(400).json({ error: "mapping must map external fields to known lead fields" });
+        return;
+      }
+    }
+    const endpoint = await updateCaptureEndpoint(
+      req.member.organizationId,
+      String(req.params.id),
+      {
+        name: typeof body.name === "string" ? body.name : void 0,
+        mapping,
+        defaultSource: typeof body.defaultSource === "string" ? body.defaultSource : void 0,
+        isActive: typeof body.isActive === "boolean" ? body.isActive : void 0
+      }
+    );
+    if (!endpoint) {
+      res.status(404).json({ error: "Capture endpoint not found" });
+      return;
+    }
+    res.json(withShareAssets(req, endpoint));
+  }
+);
+router12.delete(
+  "/capture-endpoints/:id",
+  requireMember("crm.delete"),
+  async (req, res) => {
+    const deleted = await deleteCaptureEndpoint(
+      req.member.organizationId,
+      String(req.params.id)
+    );
+    if (!deleted) {
+      res.status(404).json({ error: "Capture endpoint not found" });
+      return;
+    }
+    res.status(204).end();
+  }
+);
+router12.post(
+  "/capture-endpoints/preview",
+  requireMember("crm.read"),
+  async (req, res) => {
+    const body = req.body ?? {};
+    const mapping = sanitizeMapping(body.mapping ?? {});
+    if (!mapping) {
+      res.status(400).json({ error: "mapping must map external fields to known lead fields" });
+      return;
+    }
+    const payload = body.payload && typeof body.payload === "object" && !Array.isArray(body.payload) ? body.payload : {};
+    res.json(applyMapping(mapping, payload));
+  }
+);
+router12.get(
+  "/capture-deliveries",
+  requireMember("crm.read"),
+  async (req, res) => {
+    res.json(
+      await listRecentDeliveries(
+        req.member.organizationId,
+        typeof req.query.endpointId === "string" ? req.query.endpointId : void 0
+      )
+    );
+  }
+);
+var capture_default = router12;
+
+// src/routes/v1/contacts.ts
+var import_express13 = __toESM(require_express2(), 1);
+init_audit2();
+var router13 = (0, import_express13.Router)();
 function parsePageNumber(value) {
   return typeof value === "string" && value !== "" ? Number(value) : void 0;
 }
-router12.get(
+router13.get(
   "/contacts",
   requireMember("crm.read"),
   async (req, res) => {
@@ -65342,7 +67007,7 @@ router12.get(
     );
   }
 );
-router12.post(
+router13.post(
   "/contacts",
   requireMember("crm.write"),
   async (req, res) => {
@@ -65358,7 +67023,7 @@ router12.post(
     res.status(201).json(contact);
   }
 );
-router12.get(
+router13.get(
   "/contacts/:id",
   requireMember("crm.read"),
   async (req, res) => {
@@ -65373,7 +67038,7 @@ router12.get(
     res.json(contact);
   }
 );
-router12.patch(
+router13.patch(
   "/contacts/:id",
   requireMember("crm.write"),
   async (req, res) => {
@@ -65394,7 +67059,7 @@ router12.patch(
     res.json(contact);
   }
 );
-router12.delete(
+router13.delete(
   "/contacts/:id",
   requireMember("crm.delete"),
   async (req, res) => {
@@ -65416,7 +67081,7 @@ router12.delete(
     res.status(204).end();
   }
 );
-router12.get(
+router13.get(
   "/properties",
   requireMember("crm.read"),
   async (req, res) => {
@@ -65429,7 +67094,7 @@ router12.get(
     );
   }
 );
-router12.post(
+router13.post(
   "/properties",
   requireMember("crm.write"),
   async (req, res) => {
@@ -65449,7 +67114,7 @@ router12.post(
     res.status(201).json(property);
   }
 );
-router12.get(
+router13.get(
   "/properties/:id",
   requireMember("crm.read"),
   async (req, res) => {
@@ -65464,7 +67129,7 @@ router12.get(
     res.json(property);
   }
 );
-router12.patch(
+router13.patch(
   "/properties/:id",
   requireMember("crm.write"),
   async (req, res) => {
@@ -65485,19 +67150,19 @@ router12.patch(
     res.json(property);
   }
 );
-var contacts_default = router12;
+var contacts_default = router13;
 
 // src/routes/v1/dashboard.ts
-var import_express13 = __toESM(require_express2(), 1);
-var router13 = (0, import_express13.Router)();
-router13.get(
+var import_express14 = __toESM(require_express2(), 1);
+var router14 = (0, import_express14.Router)();
+router14.get(
   "/dashboard/summary",
   requireMember("crm.read"),
   async (req, res) => {
     res.json(await getDashboardSummary(req.member.organizationId));
   }
 );
-router13.get(
+router14.get(
   "/dashboard/marketing",
   requireMember("crm.read"),
   async (req, res) => {
@@ -65506,7 +67171,7 @@ router13.get(
     res.json(await getMarketingSummary(req.member.organizationId, days));
   }
 );
-router13.get(
+router14.get(
   "/audit-events",
   requireMember("audit.read"),
   async (req, res) => {
@@ -65523,7 +67188,7 @@ router13.get(
     res.json(await listAuditEvents(req.member.organizationId, { action, since }));
   }
 );
-var dashboard_default = router13;
+var dashboard_default = router14;
 
 // src/routes/v1/leads.ts
 init_objectStorage();
@@ -65562,16 +67227,107 @@ async function validatePhotoObjects(objectStorageService5, photoPaths) {
 }
 
 // src/routes/v1/leads.ts
-var import_express14 = __toESM(require_express2(), 1);
+var import_express15 = __toESM(require_express2(), 1);
+
+// src/lib/idempotency.ts
+init_src();
+init_drizzle_orm();
+var PENDING_STATUS = 0;
+var STALE_MS = 6e4;
+var POLL_INTERVAL_MS = 150;
+var POLL_ATTEMPTS = 20;
+function idempotencyKeyFrom(req) {
+  const raw = req.headers["x-idempotency-key"];
+  const key = typeof raw === "string" ? raw.trim().slice(0, 200) : null;
+  return key || null;
+}
+function replay(res, row) {
+  res.status(row.responseStatus).setHeader("X-Idempotent-Replay", "true").json(row.responseBody);
+}
+async function beginIdempotent(req, res, scope) {
+  const key = idempotencyKeyFrom(req);
+  if (!key) return true;
+  const organizationId = req.member.organizationId;
+  const inserted = await db.insert(apiIdempotencyKeysTable).values({
+    organizationId,
+    scope,
+    key,
+    responseStatus: PENDING_STATUS,
+    responseBody: {}
+  }).onConflictDoNothing().returning({ id: apiIdempotencyKeysTable.id });
+  if (inserted.length > 0) return true;
+  const where = and(
+    eq(apiIdempotencyKeysTable.organizationId, organizationId),
+    eq(apiIdempotencyKeysTable.scope, scope),
+    eq(apiIdempotencyKeysTable.key, key)
+  );
+  for (let i = 0; i < POLL_ATTEMPTS; i++) {
+    const [row] = await db.select().from(apiIdempotencyKeysTable).where(where);
+    if (!row) return true;
+    if (row.responseStatus !== PENDING_STATUS) {
+      replay(res, row);
+      return false;
+    }
+    if (Date.now() - row.createdAt.getTime() > STALE_MS) {
+      const claimed = await db.update(apiIdempotencyKeysTable).set({ createdAt: sql`now()` }).where(
+        and(
+          eq(apiIdempotencyKeysTable.id, row.id),
+          eq(apiIdempotencyKeysTable.responseStatus, PENDING_STATUS),
+          lt(apiIdempotencyKeysTable.createdAt, new Date(Date.now() - STALE_MS))
+        )
+      ).returning({ id: apiIdempotencyKeysTable.id });
+      if (claimed.length > 0) return true;
+    }
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+  res.status(409).json({
+    error: "A request with this idempotency key is still being processed \u2014 retry shortly"
+  });
+  return false;
+}
+async function storeIdempotent(req, scope, responseStatus, responseBody) {
+  const key = idempotencyKeyFrom(req);
+  if (!key) return;
+  try {
+    await db.update(apiIdempotencyKeysTable).set({ responseStatus, responseBody }).where(
+      and(
+        eq(apiIdempotencyKeysTable.organizationId, req.member.organizationId),
+        eq(apiIdempotencyKeysTable.scope, scope),
+        eq(apiIdempotencyKeysTable.key, key),
+        eq(apiIdempotencyKeysTable.responseStatus, PENDING_STATUS)
+      )
+    );
+  } catch (err) {
+    console.error("[idempotency] failed to store response:", err);
+  }
+}
+async function releaseIdempotent(req, scope) {
+  const key = idempotencyKeyFrom(req);
+  if (!key) return;
+  try {
+    await db.delete(apiIdempotencyKeysTable).where(
+      and(
+        eq(apiIdempotencyKeysTable.organizationId, req.member.organizationId),
+        eq(apiIdempotencyKeysTable.scope, scope),
+        eq(apiIdempotencyKeysTable.key, key),
+        eq(apiIdempotencyKeysTable.responseStatus, PENDING_STATUS)
+      )
+    );
+  } catch (err) {
+    console.error("[idempotency] failed to release key:", err);
+  }
+}
+
+// src/routes/v1/leads.ts
 init_attribution();
 init_audit2();
 init_automation();
 init_concierge();
 init_portal_message_email();
 init_providers();
-var router14 = (0, import_express14.Router)();
+var router15 = (0, import_express15.Router)();
 var objectStorageService = new ObjectStorageService();
-router14.get(
+router15.get(
   "/leads",
   requireMember("crm.read"),
   async (req, res) => {
@@ -65588,7 +67344,7 @@ router14.get(
     );
   }
 );
-router14.post(
+router15.post(
   "/leads",
   requireMember("crm.write"),
   async (req, res) => {
@@ -65597,8 +67353,10 @@ router14.post(
       res.status(400).json({ error: "Invalid lead" });
       return;
     }
+    if (!await beginIdempotent(req, res, "leads.create")) return;
     const lead = await createLead(req.member.organizationId, parsed.data);
     if (!lead) {
+      await releaseIdempotent(req, "leads.create");
       res.status(400).json({ error: "Contact not found in your organization" });
       return;
     }
@@ -65619,10 +67377,11 @@ router14.post(
         "lead.source": lead.source
       }
     });
+    await storeIdempotent(req, "leads.create", 201, lead);
     res.status(201).json(lead);
   }
 );
-router14.post(
+router15.post(
   "/leads/bulk",
   requireMember("crm.write"),
   async (req, res) => {
@@ -65679,14 +67438,14 @@ router14.post(
     res.json({ updated: updatedIds.length, skipped: leadIds.length - updatedIds.length });
   }
 );
-router14.get(
+router15.get(
   "/leads/duplicates",
   requireMember("crm.read"),
   async (req, res) => {
     res.json(await findDuplicateLeadGroups(req.member.organizationId));
   }
 );
-router14.get(
+router15.get(
   "/saved-filters",
   requireMember("crm.read"),
   async (req, res) => {
@@ -65698,7 +67457,7 @@ router14.get(
     );
   }
 );
-router14.post(
+router15.post(
   "/saved-filters",
   requireMember("crm.read"),
   async (req, res) => {
@@ -65715,7 +67474,7 @@ router14.post(
     res.status(201).json(filter);
   }
 );
-router14.delete(
+router15.delete(
   "/saved-filters/:id",
   requireMember("crm.read"),
   async (req, res) => {
@@ -65731,7 +67490,7 @@ router14.delete(
     res.status(204).end();
   }
 );
-router14.get(
+router15.get(
   "/next-actions",
   requireMember("crm.read"),
   async (req, res) => {
@@ -65742,7 +67501,7 @@ router14.get(
     );
   }
 );
-router14.get(
+router15.get(
   "/leads/:id/next-action",
   requireMember("crm.read"),
   async (req, res) => {
@@ -65757,7 +67516,7 @@ router14.get(
     res.json(action);
   }
 );
-router14.post(
+router15.post(
   "/leads/:id/next-action/feedback",
   requireMember("crm.write"),
   async (req, res) => {
@@ -65779,7 +67538,7 @@ router14.post(
     res.status(204).end();
   }
 );
-router14.get(
+router15.get(
   "/leads/:id",
   requireMember("crm.read"),
   async (req, res) => {
@@ -65791,7 +67550,7 @@ router14.get(
     res.json(lead);
   }
 );
-router14.get(
+router15.get(
   "/leads/:id/behavior",
   requireMember("crm.read"),
   async (req, res) => {
@@ -65806,7 +67565,7 @@ router14.get(
     res.json(summary);
   }
 );
-router14.patch(
+router15.patch(
   "/leads/:id",
   requireMember("crm.write"),
   async (req, res) => {
@@ -65815,6 +67574,7 @@ router14.patch(
       res.status(400).json({ error: "Invalid lead update" });
       return;
     }
+    const before = await getLead(req.member.organizationId, String(req.params.id));
     const lead = await updateLead(
       req.member.organizationId,
       String(req.params.id),
@@ -65844,14 +67604,15 @@ router14.patch(
         fields: {
           "lead.status": lead.status,
           "lead.urgency": lead.urgency,
-          "lead.assignedUserId": lead.assignedUserId
+          "lead.assignedUserId": lead.assignedUserId,
+          "lead.statusChanged": Boolean(before && before.status !== lead.status)
         }
       }
     );
     res.json(lead);
   }
 );
-router14.post(
+router15.post(
   "/leads/:id/merge",
   requireMember("crm.write"),
   async (req, res) => {
@@ -65895,7 +67656,7 @@ router14.post(
     res.json(result.lead);
   }
 );
-router14.get(
+router15.get(
   "/leads/:id/activities",
   requireMember("crm.read"),
   async (req, res) => {
@@ -65909,7 +67670,7 @@ router14.get(
     );
   }
 );
-router14.get(
+router15.get(
   "/leads/:id/conversations",
   requireMember("crm.read"),
   async (req, res) => {
@@ -65923,7 +67684,7 @@ router14.get(
     );
   }
 );
-router14.post(
+router15.post(
   "/leads/:id/activities",
   requireMember("crm.write"),
   async (req, res) => {
@@ -65937,6 +67698,7 @@ router14.post(
       res.status(404).json({ error: "Lead not found" });
       return;
     }
+    if (!await beginIdempotent(req, res, "leads.activity")) return;
     const activity = await createActivity(req.member.organizationId, {
       leadId: lead.id,
       contactId: lead.contactId,
@@ -65954,10 +67716,11 @@ router14.post(
         activityId: activity.id
       });
     }
+    await storeIdempotent(req, "leads.activity", 201, activity);
     res.status(201).json(activity);
   }
 );
-router14.post(
+router15.post(
   "/leads/:id/send-email",
   requireMember("crm.write"),
   async (req, res) => {
@@ -66028,7 +67791,7 @@ router14.post(
     res.status(201).json(activity);
   }
 );
-router14.post(
+router15.post(
   "/leads/:id/photos/request-url",
   requireMember("crm.write"),
   async (req, res) => {
@@ -66052,7 +67815,7 @@ router14.post(
     }
   }
 );
-router14.post(
+router15.post(
   "/leads/:id/photos",
   requireMember("crm.write"),
   async (req, res) => {
@@ -66087,7 +67850,7 @@ router14.post(
     res.status(201).json(activity);
   }
 );
-router14.delete(
+router15.delete(
   "/leads/:id/photos",
   requireMember("crm.write"),
   async (req, res) => {
@@ -66113,16 +67876,16 @@ router14.delete(
     res.status(204).end();
   }
 );
-var leads_default = router14;
+var leads_default = router15;
 
 // src/routes/v1/me.ts
 init_src();
 init_drizzle_orm();
-var import_express15 = __toESM(require_express2(), 1);
+var import_express16 = __toESM(require_express2(), 1);
 init_rateLimit();
 init_audit2();
 init_invite_email();
-var router15 = (0, import_express15.Router)();
+var router16 = (0, import_express16.Router)();
 function memberDto(u) {
   return {
     id: u.id,
@@ -66133,7 +67896,7 @@ function memberDto(u) {
     isActive: u.isActive
   };
 }
-router15.get(
+router16.get(
   "/me",
   requireMember("crm.read"),
   async (req, res) => {
@@ -66155,7 +67918,7 @@ router15.get(
     });
   }
 );
-router15.get(
+router16.get(
   "/users",
   requireMember("users.read"),
   async (req, res) => {
@@ -66172,7 +67935,7 @@ router15.get(
     );
   }
 );
-router15.post(
+router16.post(
   "/users/invite",
   requireMember("users.manage"),
   async (req, res) => {
@@ -66224,7 +67987,7 @@ router15.post(
     res.status(201).json({ ...memberDto(user), inviteEmail });
   }
 );
-router15.post(
+router16.post(
   "/users/:id/resend-invite",
   requireMember("users.manage"),
   async (req, res) => {
@@ -66283,7 +68046,7 @@ router15.post(
     res.json(result);
   }
 );
-router15.patch(
+router16.patch(
   "/users/:id",
   requireMember("users.manage"),
   async (req, res) => {
@@ -66329,12 +68092,11 @@ router15.patch(
     res.json(memberDto(updated));
   }
 );
-var me_default = router15;
+var me_default = router16;
 
 // src/routes/v1/public.ts
 init_src();
-var import_express16 = __toESM(require_express2(), 1);
-init_client_config();
+var import_express17 = __toESM(require_express2(), 1);
 init_objectStorage();
 init_rateLimit();
 
@@ -66699,12 +68461,12 @@ function buildSvg(input) {
 </svg>`;
 }
 var MAX_CACHE_ENTRIES = 200;
-var cache = /* @__PURE__ */ new Map();
+var cache2 = /* @__PURE__ */ new Map();
 function renderAreaShareCard(input) {
   const key = [input.city, input.state, input.businessName, input.phone].join(
     "\0"
   );
-  const cached = cache.get(key);
+  const cached = cache2.get(key);
   if (cached) return cached;
   const resvg = new Resvg(buildSvg(input), {
     fitTo: { mode: "width", value: WIDTH },
@@ -66715,12 +68477,12 @@ function renderAreaShareCard(input) {
     }
   });
   const png = resvg.render().asPng();
-  if (cache.size >= MAX_CACHE_ENTRIES) {
-    const oldest = cache.keys().next().value;
-    if (oldest !== void 0) cache.delete(oldest);
+  if (cache2.size >= MAX_CACHE_ENTRIES) {
+    const oldest = cache2.keys().next().value;
+    if (oldest !== void 0) cache2.delete(oldest);
   }
-  cache.set(key, Buffer.from(png));
-  return cache.get(key);
+  cache2.set(key, Buffer.from(png));
+  return cache2.get(key);
 }
 
 // src/routes/v1/public.ts
@@ -67580,14 +69342,90 @@ var FORMS_JS = `(function () {
 })();
 `;
 
+// src/widget/captureScript.ts
+var CAPTURE_JS_VERSION = 1;
+var CAPTURE_JS = `(function () {
+  'use strict';
+  try {
+    var script = document.currentScript;
+    if (!script) {
+      var scripts = document.querySelectorAll('script[data-capture-token]');
+      script = scripts[scripts.length - 1];
+    }
+    if (!script) return;
+    var token = script.getAttribute('data-capture-token');
+    var selector = script.getAttribute('data-form-selector') || 'form';
+    if (!token) return;
+    var src = script.getAttribute('src') || '';
+    var base = src.replace(/\\/public\\/capture\\.js.*$/, '');
+    if (!/^https?:/.test(base)) {
+      base = (src.charAt(0) === '/' ? window.location.origin : '') + base;
+    }
+    var url = base + '/public/capture/' + encodeURIComponent(token);
+
+    function serialize(form) {
+      var out = {};
+      try {
+        var fd = new FormData(form);
+        fd.forEach(function (value, key) {
+          if (typeof value !== 'string') return; // skip files
+          if (/password|card|cvv|cvc|ssn/i.test(key)) return;
+          if (out[key] === undefined) out[key] = value.slice(0, 2000);
+        });
+      } catch (e) { /* never break the host form */ }
+      return out;
+    }
+
+    function mirror(form) {
+      try {
+        var payload = serialize(form);
+        if (Object.keys(payload).length === 0) return;
+        payload._idempotencyKey =
+          'cjs-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+        var body = JSON.stringify(payload);
+        var sent = false;
+        if (navigator.sendBeacon) {
+          try {
+            sent = navigator.sendBeacon(
+              url, new Blob([body], { type: 'application/json' }));
+          } catch (e) { sent = false; }
+        }
+        if (!sent && window.fetch) {
+          fetch(url, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: body,
+            keepalive: true,
+            mode: 'cors'
+          }).catch(function () { /* swallow: host form must not notice */ });
+        }
+      } catch (e) { /* swallow: host form must not notice */ }
+    }
+
+    // Capture phase, passive observation only \u2014 the event is never
+    // cancelled or stopped, so the site's own handlers and native submit
+    // proceed exactly as before.
+    document.addEventListener('submit', function (event) {
+      try {
+        var form = event.target;
+        if (!form || form.nodeName !== 'FORM') return;
+        if (!form.matches(selector)) return;
+        mirror(form);
+      } catch (e) { /* swallow */ }
+    }, true);
+  } catch (e) { /* never throw into the host page */ }
+})();
+`;
+
 // src/routes/v1/public.ts
-var router16 = (0, import_express16.Router)();
+init_engagement_links2();
+var router17 = (0, import_express17.Router)();
 var objectStorageService2 = new ObjectStorageService();
 var UUID_RE3 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function clientIp(req) {
   return req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket.remoteAddress || void 0;
 }
-router16.post(
+router17.post(
   "/public/assessments",
   rateLimit({ windowMs: 6e4, max: 5, key: "assessments" }),
   resolvePublicOrg(),
@@ -67625,7 +69463,7 @@ router16.post(
     res.status(201).json(result);
   }
 );
-router16.post(
+router17.post(
   "/public/uploads/request-url",
   rateLimit({ windowMs: 6e4, max: 20, key: "public-uploads" }),
   resolvePublicOrg(),
@@ -67645,7 +69483,7 @@ router16.post(
     }
   }
 );
-router16.post(
+router17.post(
   "/public/storm-check",
   rateLimit({ windowMs: 6e4, max: 10, key: "storm-check" }),
   resolvePublicOrg(),
@@ -67664,7 +69502,7 @@ router16.post(
     });
   }
 );
-router16.post(
+router17.post(
   "/public/concierge/conversations",
   rateLimit({ windowMs: 6e4, max: 10, key: "concierge-start" }),
   resolvePublicOrg(),
@@ -67696,7 +69534,7 @@ var ALLOWED_AUDIO_TYPES = /* @__PURE__ */ new Set([
   "audio/webm",
   "audio/3gpp"
 ]);
-router16.post(
+router17.post(
   "/public/concierge/transcriptions",
   rateLimit({ windowMs: 6e4, max: 20, key: "concierge-transcribe" }),
   resolvePublicOrg(),
@@ -67735,7 +69573,7 @@ router16.post(
     }
   }
 );
-router16.post(
+router17.post(
   "/public/concierge/conversations/:id/messages",
   rateLimit({ windowMs: 6e4, max: 30, key: "concierge-message" }),
   resolvePublicOrg(),
@@ -67765,7 +69603,7 @@ router16.post(
     res.json(reply);
   }
 );
-router16.get(
+router17.get(
   "/public/site-config",
   rateLimit({ windowMs: 6e4, max: 60, key: "site-config" }),
   resolvePublicOrg(),
@@ -67779,7 +69617,7 @@ router16.get(
     });
   }
 );
-router16.get(
+router17.get(
   "/public/og/area/:slug",
   rateLimit({ windowMs: 6e4, max: 60, key: "og-area-card" }),
   resolvePublicOrg(),
@@ -67798,13 +69636,13 @@ router16.get(
     const png = renderAreaShareCard({
       city: area.name,
       state: area.state ?? "GA",
-      businessName: profile.businessName?.trim() || CLIENT.defaultOrgName,
-      phone: profile.phone?.trim() || CLIENT.phone
+      businessName: profile.businessName?.trim() || await getBusinessName(req.publicOrg.id),
+      phone: profile.phone?.trim() || ""
     });
     res.status(200).setHeader("Content-Type", "image/png").setHeader("Cache-Control", "public, max-age=3600").send(png);
   }
 );
-router16.post(
+router17.post(
   "/public/analytics-events",
   rateLimit({ windowMs: 6e4, max: 60, key: "analytics" }),
   resolvePublicOrg(),
@@ -67827,14 +69665,14 @@ router16.post(
     res.status(202).json({ accepted: true });
   }
 );
-router16.get(
+router17.get(
   "/public/closer.js",
   rateLimit({ windowMs: 6e4, max: 120, key: "closer-js" }),
   (_req, res) => {
     res.status(200).setHeader("Content-Type", "application/javascript; charset=utf-8").setHeader("Cache-Control", "public, max-age=3600").setHeader("ETag", `"closer-v${CLOSER_JS_VERSION}"`).send(CLOSER_JS);
   }
 );
-router16.get(
+router17.get(
   "/public/widget-config",
   rateLimit({ windowMs: 6e4, max: 120, key: "widget-config" }),
   resolvePublicOrg({ requireKey: true }),
@@ -67847,7 +69685,7 @@ router16.get(
     );
   }
 );
-router16.post(
+router17.post(
   "/public/widget-leads",
   rateLimit({ windowMs: 6e4, max: 10, key: "widget-leads" }),
   resolvePublicOrg({ requireKey: true }),
@@ -67880,7 +69718,7 @@ router16.post(
     res.status(201).json({ leadId: result.leadId });
   }
 );
-router16.post(
+router17.post(
   "/public/widget-heartbeat",
   rateLimit({ windowMs: 6e4, max: 60, key: "widget-heartbeat" }),
   resolvePublicOrg({ requireKey: true }),
@@ -67899,14 +69737,14 @@ router16.post(
     res.status(204).end();
   }
 );
-router16.get(
+router17.get(
   "/public/forms.js",
   rateLimit({ windowMs: 6e4, max: 120, key: "forms-js" }),
   (_req, res) => {
     res.status(200).setHeader("Content-Type", "application/javascript; charset=utf-8").setHeader("Cache-Control", "public, max-age=3600").setHeader("ETag", `"forms-v${FORMS_JS_VERSION}"`).send(FORMS_JS);
   }
 );
-router16.get(
+router17.get(
   "/public/forms/:slug",
   rateLimit({ windowMs: 6e4, max: 120, key: "public-form-def" }),
   resolvePublicOrg(),
@@ -67919,7 +69757,7 @@ router16.get(
     res.setHeader("Cache-Control", "private, max-age=120").json(form);
   }
 );
-router16.post(
+router17.post(
   "/public/forms/:slug/submissions",
   rateLimit({ windowMs: 6e4, max: 5, key: "public-form-submit" }),
   resolvePublicOrg(),
@@ -67968,7 +69806,39 @@ router16.post(
     res.status(201).json(result);
   }
 );
-router16.get(
+router17.get(
+  "/public/capture.js",
+  rateLimit({ windowMs: 6e4, max: 120, key: "capture-js" }),
+  (_req, res) => {
+    res.status(200).setHeader("Content-Type", "application/javascript; charset=utf-8").setHeader("Cache-Control", "public, max-age=3600").setHeader("ETag", `"capture-v${CAPTURE_JS_VERSION}"`).send(CAPTURE_JS);
+  }
+);
+router17.post(
+  "/public/capture/:token",
+  rateLimit({ windowMs: 6e4, max: 30, key: "public-capture" }),
+  async (req, res) => {
+    const endpoint = await getEndpointByToken(String(req.params.token));
+    if (!endpoint) {
+      res.status(404).json({ error: "Unknown capture endpoint" });
+      return;
+    }
+    const body = req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
+    const headerKey = req.headers["x-idempotency-key"];
+    const idempotencyKey = typeof headerKey === "string" && headerKey || (typeof body._idempotencyKey === "string" ? body._idempotencyKey : null);
+    const result = await captureExternalLead(endpoint, body, { idempotencyKey });
+    if (!result.ok) {
+      res.status(422).json({ error: result.error });
+      return;
+    }
+    res.status(result.duplicateDelivery ? 200 : 201).json({
+      ok: true,
+      leadId: result.leadId,
+      outcome: result.outcome,
+      duplicate: result.duplicateDelivery
+    });
+  }
+);
+router17.get(
   "/public/form-page/:slug",
   rateLimit({ windowMs: 6e4, max: 60, key: "form-page" }),
   (req, res) => {
@@ -67991,7 +69861,60 @@ router16.get(
 </html>`);
   }
 );
-router16.get(
+router17.get(
+  "/public/el/:token",
+  rateLimit({ windowMs: 6e4, max: 30, key: "engagement-link" }),
+  async (req, res) => {
+    const link = await findEngagementLink(String(req.params.token));
+    if (!link || link.kind !== "review") {
+      res.status(404).send("Link not found");
+      return;
+    }
+    const destination = await recordReviewClick(link);
+    res.redirect(302, destination);
+  }
+);
+router17.get(
+  "/public/referrals/:token",
+  rateLimit({ windowMs: 6e4, max: 30, key: "referral-info" }),
+  async (req, res) => {
+    const link = await findEngagementLink(String(req.params.token));
+    if (!link || link.kind !== "referral") {
+      res.status(404).json({ error: "Link not found" });
+      return;
+    }
+    res.json({ businessName: await getBusinessName(link.organizationId) });
+  }
+);
+router17.post(
+  "/public/referrals/:token",
+  rateLimit({ windowMs: 6e4, max: 10, key: "referral-submit" }),
+  async (req, res) => {
+    const link = await findEngagementLink(String(req.params.token));
+    if (!link || link.kind !== "referral") {
+      res.status(404).json({ error: "Link not found" });
+      return;
+    }
+    const parsed = SubmitReferralBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid referral" });
+      return;
+    }
+    const { name, email: email2, phone, notes } = parsed.data;
+    if (!email2 && !phone) {
+      res.status(400).json({ error: "An email or phone number is required" });
+      return;
+    }
+    const result = await recordReferralSubmission(link, {
+      name,
+      email: email2 ?? void 0,
+      phone: phone ?? void 0,
+      notes: notes ?? void 0
+    });
+    res.status(201).json({ ok: true, leadId: result.leadId });
+  }
+);
+router17.get(
   "/public/widget-demo",
   rateLimit({ windowMs: 6e4, max: 30, key: "widget-demo" }),
   (req, res) => {
@@ -68013,18 +69936,18 @@ ${snippet}
 </html>`);
   }
 );
-var public_default = router16;
+var public_default = router17;
 
 // src/routes/v1/unsubscribe.ts
 init_src();
 init_drizzle_orm();
-var import_express17 = __toESM(require_express2(), 1);
+var import_express18 = __toESM(require_express2(), 1);
 init_rateLimit();
 init_audit2();
 init_playbooks2();
 init_send_gate();
 import { createHmac as createHmac3 } from "node:crypto";
-var router17 = (0, import_express17.Router)();
+var router18 = (0, import_express18.Router)();
 function page(title, body) {
   return `<!doctype html>
 <html lang="en">
@@ -68033,7 +69956,7 @@ function page(title, body) {
 <body>${body}</body>
 </html>`;
 }
-router17.get(
+router18.get(
   "/public/unsubscribe/:token",
   rateLimit({ windowMs: 6e4, max: 30, key: "unsubscribe" }),
   async (req, res) => {
@@ -68052,7 +69975,7 @@ router17.get(
     );
   }
 );
-router17.post(
+router18.post(
   "/public/unsubscribe/:token",
   rateLimit({ windowMs: 6e4, max: 10, key: "unsubscribe-post" }),
   async (req, res) => {
@@ -68115,7 +70038,7 @@ function twilioSignatureValid(req) {
   const expected = createHmac3("sha1", token).update(data, "utf8").digest("base64");
   return signature === expected;
 }
-router17.post(
+router18.post(
   "/public/sms/inbound",
   rateLimit({ windowMs: 6e4, max: 60, key: "sms-inbound" }),
   async (req, res) => {
@@ -68223,16 +70146,16 @@ async function stopContactEnrollments(organizationId, contactId, reason) {
     await stopEnrollmentsForLead(organizationId, lead.id, reason, "stopped");
   }
 }
-var unsubscribe_default = router17;
+var unsubscribe_default = router18;
 
 // src/routes/v1/settings.ts
-var import_express19 = __toESM(require_express2(), 1);
+var import_express20 = __toESM(require_express2(), 1);
 
 // src/routes/v1/google-reviews.ts
-var import_express18 = __toESM(require_express2(), 1);
+var import_express19 = __toESM(require_express2(), 1);
 init_rateLimit();
 init_settings2();
-var router18 = (0, import_express18.Router)();
+var router19 = (0, import_express19.Router)();
 var reviewCache = /* @__PURE__ */ new Map();
 var CACHE_TTL_MS = 24 * 60 * 60 * 1e3;
 var reviewCacheJustCleared = false;
@@ -68266,7 +70189,7 @@ async function fetchFromGooglePlaces(apiKey, placeId) {
     profilePhotoUrl: r.profile_photo_url ?? null
   }));
 }
-router18.get(
+router19.get(
   "/public/google-reviews",
   rateLimit({ windowMs: 6e4, max: 60, key: "google-reviews" }),
   resolvePublicOrg(),
@@ -68325,7 +70248,7 @@ router18.get(
     }
   }
 );
-var google_reviews_default = router18;
+var google_reviews_default = router19;
 
 // src/routes/v1/settings.ts
 init_audit2();
@@ -68350,8 +70273,8 @@ function applyApiKeyMask(settings, isAdmin) {
     googleReviews: { ...googleReviews, apiKey: maskApiKey(googleReviews.apiKey) }
   };
 }
-var router19 = (0, import_express19.Router)();
-router19.get(
+var router20 = (0, import_express20.Router)();
+router20.get(
   "/settings/email-provider",
   requireMember("settings.manage"),
   async (req, res) => {
@@ -68367,21 +70290,21 @@ router19.get(
     });
   }
 );
-router19.get(
+router20.get(
   "/settings/sms-provider",
   requireMember("settings.manage"),
   (_req, res) => {
     res.json(getSmsProviderStatus());
   }
 );
-router19.get(
+router20.get(
   "/settings/inspection-availability",
   requireMember("crm.read"),
   async (req, res) => {
     res.json(await getInspectionAvailability(req.member.organizationId));
   }
 );
-router19.get(
+router20.get(
   "/settings",
   requireMember("crm.read"),
   async (req, res) => {
@@ -68390,7 +70313,7 @@ router19.get(
     res.json(applyApiKeyMask(settings, isAdmin));
   }
 );
-router19.put(
+router20.put(
   "/settings",
   requireMember("settings.manage"),
   async (req, res) => {
@@ -68438,21 +70361,21 @@ router19.put(
     res.json(applyApiKeyMask(settings, true));
   }
 );
-var settings_default = router19;
+var settings_default = router20;
 
 // src/routes/v1/tags.ts
-var import_express20 = __toESM(require_express2(), 1);
+var import_express21 = __toESM(require_express2(), 1);
 init_audit2();
 init_automation();
-var router20 = (0, import_express20.Router)();
-router20.get(
+var router21 = (0, import_express21.Router)();
+router21.get(
   "/tags",
   requireMember("crm.read"),
   async (req, res) => {
     res.json(await listTags(req.member.organizationId));
   }
 );
-router20.post(
+router21.post(
   "/tags",
   requireMember("crm.write"),
   async (req, res) => {
@@ -68480,12 +70403,12 @@ router20.post(
     res.status(201).json(tag);
   }
 );
-var tags_default = router20;
+var tags_default = router21;
 
 // src/routes/v1/tasks.ts
-var import_express21 = __toESM(require_express2(), 1);
-var router21 = (0, import_express21.Router)();
-router21.get(
+var import_express22 = __toESM(require_express2(), 1);
+var router22 = (0, import_express22.Router)();
+router22.get(
   "/tasks",
   requireMember("crm.read"),
   async (req, res) => {
@@ -68497,7 +70420,7 @@ router21.get(
     );
   }
 );
-router21.post(
+router22.post(
   "/tasks",
   requireMember("crm.write"),
   async (req, res) => {
@@ -68514,7 +70437,7 @@ router21.post(
     res.status(201).json(task);
   }
 );
-router21.patch(
+router22.patch(
   "/tasks/:id",
   requireMember("crm.write"),
   async (req, res) => {
@@ -68535,7 +70458,7 @@ router21.patch(
     res.json(task);
   }
 );
-router21.delete(
+router22.delete(
   "/tasks/:id",
   requireMember("crm.delete"),
   async (req, res) => {
@@ -68550,21 +70473,21 @@ router21.delete(
     res.status(204).end();
   }
 );
-var tasks_default = router21;
+var tasks_default = router22;
 
 // src/routes/v1/templates.ts
-var import_express22 = __toESM(require_express2(), 1);
+var import_express23 = __toESM(require_express2(), 1);
 init_audit2();
 init_automation();
-var router22 = (0, import_express22.Router)();
-router22.get(
+var router23 = (0, import_express23.Router)();
+router23.get(
   "/templates",
   requireMember("crm.read"),
   async (req, res) => {
     res.json(await listTemplates(req.member.organizationId));
   }
 );
-router22.post(
+router23.post(
   "/templates",
   requireMember("settings.manage"),
   async (req, res) => {
@@ -68587,7 +70510,7 @@ router22.post(
     res.status(201).json(template);
   }
 );
-router22.patch(
+router23.patch(
   "/templates/:id",
   requireMember("settings.manage"),
   async (req, res) => {
@@ -68615,7 +70538,7 @@ router22.patch(
     res.json(template);
   }
 );
-router22.delete(
+router23.delete(
   "/templates/:id",
   requireMember("settings.manage"),
   async (req, res) => {
@@ -68637,18 +70560,18 @@ router22.delete(
     res.status(204).end();
   }
 );
-var templates_default = router22;
+var templates_default = router23;
 
 // src/routes/v1/webhooks.ts
-var import_express23 = __toESM(require_express2(), 1);
+var import_express24 = __toESM(require_express2(), 1);
 init_audit2();
 init_webhooks2();
-var router23 = (0, import_express23.Router)();
+var router24 = (0, import_express24.Router)();
 function redact(endpoint) {
   const { secret: _secret, previousSecret: _prev, ...rest } = endpoint;
   return rest;
 }
-router23.get(
+router24.get(
   "/webhooks",
   requireMember("settings.manage"),
   async (req, res) => {
@@ -68656,7 +70579,7 @@ router23.get(
     res.json(rows.map(redact));
   }
 );
-router23.post(
+router24.post(
   "/webhooks",
   requireMember("settings.manage"),
   async (req, res) => {
@@ -68684,7 +70607,7 @@ router23.post(
     res.status(201).json(endpoint);
   }
 );
-router23.patch(
+router24.patch(
   "/webhooks/:id",
   requireMember("settings.manage"),
   async (req, res) => {
@@ -68717,7 +70640,7 @@ router23.patch(
     res.json(redact(endpoint));
   }
 );
-router23.post(
+router24.post(
   "/webhooks/:id/rotate-secret",
   requireMember("settings.manage"),
   async (req, res) => {
@@ -68748,7 +70671,7 @@ router23.post(
     res.json(rest);
   }
 );
-router23.delete(
+router24.delete(
   "/webhooks/:id/previous-secret",
   requireMember("settings.manage"),
   async (req, res) => {
@@ -68771,7 +70694,7 @@ router23.delete(
     res.json(redact(endpoint));
   }
 );
-router23.delete(
+router24.delete(
   "/webhooks/:id",
   requireMember("settings.manage"),
   async (req, res) => {
@@ -68793,7 +70716,7 @@ router23.delete(
     res.status(204).end();
   }
 );
-router23.get(
+router24.get(
   "/webhook-deliveries",
   requireMember("settings.manage"),
   async (req, res) => {
@@ -68805,13 +70728,13 @@ router23.get(
     );
   }
 );
-var webhooks_default = router23;
+var webhooks_default = router24;
 
 // src/routes/v1/estimates.ts
-var import_express24 = __toESM(require_express2(), 1);
+var import_express25 = __toESM(require_express2(), 1);
 init_audit2();
-var router24 = (0, import_express24.Router)();
-router24.get(
+var router25 = (0, import_express25.Router)();
+router25.get(
   "/estimates",
   requireMember("crm.read"),
   async (req, res) => {
@@ -68825,7 +70748,7 @@ router24.get(
     );
   }
 );
-router24.post(
+router25.post(
   "/estimates",
   requireMember("crm.write"),
   async (req, res) => {
@@ -68852,7 +70775,7 @@ router24.post(
     res.status(201).json(estimate);
   }
 );
-router24.get(
+router25.get(
   "/estimates/:id",
   requireMember("crm.read"),
   async (req, res) => {
@@ -68867,7 +70790,7 @@ router24.get(
     res.json(estimate);
   }
 );
-router24.patch(
+router25.patch(
   "/estimates/:id",
   requireMember("crm.write"),
   async (req, res) => {
@@ -68898,7 +70821,7 @@ router24.patch(
     res.json(estimate);
   }
 );
-router24.delete(
+router25.delete(
   "/estimates/:id",
   requireMember("crm.delete"),
   async (req, res) => {
@@ -68920,13 +70843,13 @@ router24.delete(
     res.status(204).end();
   }
 );
-var estimates_default = router24;
+var estimates_default = router25;
 
 // src/routes/v1/projects.ts
-var import_express25 = __toESM(require_express2(), 1);
+var import_express26 = __toESM(require_express2(), 1);
 init_audit2();
-var router25 = (0, import_express25.Router)();
-router25.get(
+var router26 = (0, import_express26.Router)();
+router26.get(
   "/projects",
   requireMember("crm.read"),
   async (req, res) => {
@@ -68938,7 +70861,7 @@ router25.get(
     );
   }
 );
-router25.post(
+router26.post(
   "/projects",
   requireMember("crm.write"),
   async (req, res) => {
@@ -68971,7 +70894,7 @@ router25.post(
     res.status(201).json(project);
   }
 );
-router25.get(
+router26.get(
   "/projects/:id",
   requireMember("crm.read"),
   async (req, res) => {
@@ -68986,7 +70909,7 @@ router25.get(
     res.json(project);
   }
 );
-router25.patch(
+router26.patch(
   "/projects/:id",
   requireMember("crm.write"),
   async (req, res) => {
@@ -69023,7 +70946,7 @@ router25.patch(
     res.json(project);
   }
 );
-router25.delete(
+router26.delete(
   "/projects/:id",
   requireMember("crm.delete"),
   async (req, res) => {
@@ -69045,15 +70968,15 @@ router25.delete(
     res.status(204).end();
   }
 );
-var projects_default = router25;
+var projects_default = router26;
 
 // src/routes/v1/storage.ts
-var import_express26 = __toESM(require_express2(), 1);
+var import_express27 = __toESM(require_express2(), 1);
 init_objectStorage();
 import { Readable as Readable2 } from "stream";
-var router26 = (0, import_express26.Router)();
+var router27 = (0, import_express27.Router)();
 var objectStorageService3 = new ObjectStorageService();
-router26.get(
+router27.get(
   "/storage/objects/*path",
   requireMember("crm.read"),
   async (req, res) => {
@@ -69098,20 +71021,20 @@ router26.get(
     }
   }
 );
-var storage_default = router26;
+var storage_default = router27;
 
 // src/routes/v1/portal.ts
-var import_express27 = __toESM(require_express2(), 1);
+var import_express28 = __toESM(require_express2(), 1);
 init_objectStorage();
 init_rateLimit();
 import { Readable as Readable3 } from "node:stream";
 init_portal2();
-var router27 = (0, import_express27.Router)();
+var router28 = (0, import_express28.Router)();
 var UUID_RE4 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function portalToken(req) {
   return String(req.headers["x-portal-token"] ?? "");
 }
-router27.post(
+router28.post(
   "/portal/login/request",
   rateLimit({ windowMs: 6e4, max: 5, key: "portal-login-request" }),
   async (req, res) => {
@@ -69134,7 +71057,7 @@ router27.post(
     res.status(202).json({ sent: true, channel: result.channel });
   }
 );
-router27.post(
+router28.post(
   "/portal/login/verify",
   rateLimit({ windowMs: 6e4, max: 10, key: "portal-login-verify" }),
   async (req, res) => {
@@ -69159,7 +71082,7 @@ router27.post(
     });
   }
 );
-router27.get(
+router28.get(
   "/portal/overview",
   rateLimit({ windowMs: 6e4, max: 60, key: "portal-overview" }),
   async (req, res) => {
@@ -69171,7 +71094,7 @@ router27.get(
     res.json(await getPortalOverview(session));
   }
 );
-router27.post(
+router28.post(
   "/portal/claims/:id/messages",
   rateLimit({ windowMs: 6e4, max: 15, key: "portal-message" }),
   async (req, res) => {
@@ -69202,7 +71125,7 @@ router27.post(
     res.status(201).json({ sent: true });
   }
 );
-router27.get(
+router28.get(
   "/portal/claims/:id/conversation",
   rateLimit({ windowMs: 6e4, max: 60, key: "portal-conversation" }),
   async (req, res) => {
@@ -69225,7 +71148,7 @@ router27.get(
   }
 );
 var objectStorageService4 = new ObjectStorageService();
-router27.post(
+router28.post(
   "/portal/claims/:id/photos",
   rateLimit({ windowMs: 6e4, max: 15, key: "portal-add-photos" }),
   async (req, res) => {
@@ -69270,7 +71193,7 @@ router27.post(
     res.status(201).json({ attached });
   }
 );
-router27.get(
+router28.get(
   "/portal/photos/objects/*path",
   rateLimit({ windowMs: 6e4, max: 120, key: "portal-photo" }),
   async (req, res) => {
@@ -69317,7 +71240,7 @@ router27.get(
     }
   }
 );
-router27.post(
+router28.post(
   "/portal/logout",
   async (req, res) => {
     const token = portalToken(req);
@@ -69325,43 +71248,723 @@ router27.post(
     res.json({ ok: true });
   }
 );
-var portal_default = router27;
+var portal_default = router28;
+
+// src/routes/v1/orgs.ts
+init_src();
+init_drizzle_orm();
+var import_express29 = __toESM(require_express2(), 1);
+init_audit2();
+var router29 = (0, import_express29.Router)();
+async function requireSessionUser(req, res, next) {
+  if (req.header("x-api-key")) {
+    res.status(403).json({ error: "API keys cannot manage organizations" });
+    return;
+  }
+  if (!req.isAuthenticated() || !req.user?.id) {
+    res.status(401).json({ error: "Not authenticated" });
+    return;
+  }
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user.id));
+  if (!user || !user.isActive) {
+    res.status(403).json({ error: "Account is not active" });
+    return;
+  }
+  req.sessionUser = user;
+  next();
+}
+async function requirePlatformAdmin(req, res, next) {
+  await requireSessionUser(req, res, () => {
+    if (!req.sessionUser?.isPlatformAdmin) {
+      res.status(403).json({ error: "Platform admin access required" });
+      return;
+    }
+    next();
+  });
+}
+router29.get(
+  "/session",
+  requireSessionUser,
+  async (req, res) => {
+    const user = req.sessionUser;
+    const organization = user.organizationId ? (await db.select().from(organizationsTable).where(eq(organizationsTable.id, user.organizationId)))[0] ?? null : null;
+    res.json({
+      id: user.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      isPlatformAdmin: user.isPlatformAdmin,
+      organization: organization ? {
+        id: organization.id,
+        name: organization.name,
+        slug: organization.slug,
+        timezone: organization.timezone
+      } : null
+    });
+  }
+);
+router29.post(
+  "/orgs",
+  requireSessionUser,
+  async (req, res) => {
+    const body = req.body ?? {};
+    const name = typeof body.name === "string" ? body.name : "";
+    const slug = typeof body.slug === "string" ? body.slug : void 0;
+    const timezone = typeof body.timezone === "string" ? body.timezone : void 0;
+    if (!name.trim()) {
+      res.status(400).json({ error: "Company name is required" });
+      return;
+    }
+    const user = req.sessionUser;
+    const attachCreator = !user.organizationId;
+    if (user.organizationId && !user.isPlatformAdmin) {
+      res.status(409).json({ error: "You already belong to an organization" });
+      return;
+    }
+    const result = await createOrganization({
+      name,
+      slug,
+      timezone,
+      creatorUserId: user.id,
+      attachCreator
+    });
+    if ("error" in result) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    await recordAudit({
+      organizationId: result.org.id,
+      actorUserId: user.id,
+      action: "organization.created",
+      entityType: "organization",
+      entityId: result.org.id,
+      metadata: { name: result.org.name, slug: result.org.slug }
+    });
+    res.status(201).json({ organization: result.org, joined: attachCreator });
+  }
+);
+router29.get(
+  "/platform/orgs",
+  requirePlatformAdmin,
+  async (_req, res) => {
+    const orgs = await listAllOrganizations();
+    res.json({
+      organizations: orgs.map((o) => ({
+        id: o.id,
+        name: o.name,
+        slug: o.slug,
+        timezone: o.timezone,
+        createdAt: o.createdAt?.toISOString?.() ?? String(o.createdAt),
+        memberCount: Number(o.memberCount ?? 0)
+      }))
+    });
+  }
+);
+router29.patch(
+  "/platform/orgs/:id",
+  requirePlatformAdmin,
+  async (req, res) => {
+    const body = req.body ?? {};
+    const patch = {};
+    if (typeof body.name === "string" && body.name.trim().length >= 2) {
+      patch.name = body.name.trim().slice(0, 120);
+    }
+    if (typeof body.timezone === "string" && body.timezone.trim()) {
+      try {
+        new Intl.DateTimeFormat("en-US", { timeZone: body.timezone });
+        patch.timezone = body.timezone;
+      } catch {
+        res.status(400).json({ error: "Invalid timezone" });
+        return;
+      }
+    }
+    if (Object.keys(patch).length === 0) {
+      res.status(400).json({ error: "Nothing to update" });
+      return;
+    }
+    const [updated] = await db.update(organizationsTable).set(patch).where(eq(organizationsTable.id, String(req.params.id))).returning();
+    if (!updated) {
+      res.status(404).json({ error: "Organization not found" });
+      return;
+    }
+    await recordAudit({
+      organizationId: updated.id,
+      actorUserId: req.sessionUser.id,
+      action: "organization.updated",
+      entityType: "organization",
+      entityId: updated.id,
+      metadata: patch
+    });
+    res.json({
+      organization: {
+        id: updated.id,
+        name: updated.name,
+        slug: updated.slug,
+        timezone: updated.timezone
+      }
+    });
+  }
+);
+var orgs_default = router29;
+
+// src/routes/v1/onboarding.ts
+var import_express30 = __toESM(require_express2(), 1);
+
+// src/services/onboarding.ts
+init_src();
+init_drizzle_orm();
+init_settings2();
+init_settings2();
+init_playbooks2();
+var ONBOARDING_STEPS = [
+  "company",
+  "services",
+  "hours",
+  "channels",
+  "booking",
+  "playbook",
+  "concierge",
+  "domain",
+  "snippet",
+  "verify",
+  "test-lead",
+  "launch"
+];
+var STEP_SET = new Set(ONBOARDING_STEPS);
+async function getOnboardingState(organizationId) {
+  const settings = await getOrgSettings(organizationId);
+  const raw = settings.onboarding ?? { completedSteps: [] };
+  return {
+    completedSteps: (raw.completedSteps ?? []).filter((s) => STEP_SET.has(s)),
+    currentStep: raw.currentStep && STEP_SET.has(raw.currentStep) ? raw.currentStep : void 0,
+    completedAt: raw.completedAt ?? null,
+    dismissedAt: raw.dismissedAt ?? null
+  };
+}
+async function updateOnboardingState(organizationId, patch) {
+  const badStep = [...patch.completeSteps ?? [], ...patch.currentStep ? [patch.currentStep] : []].find((s) => !STEP_SET.has(s));
+  if (badStep) return { error: `Unknown onboarding step: ${badStep}` };
+  const current = await getOnboardingState(organizationId);
+  const completed = [...current.completedSteps];
+  for (const step of patch.completeSteps ?? []) {
+    if (!completed.includes(step)) completed.push(step);
+  }
+  const next = {
+    completedSteps: completed,
+    currentStep: patch.currentStep ?? current.currentStep,
+    completedAt: patch.launched ? current.completedAt ?? (/* @__PURE__ */ new Date()).toISOString() : current.completedAt ?? null,
+    dismissedAt: patch.dismissed === void 0 ? current.dismissedAt ?? null : patch.dismissed ? (/* @__PURE__ */ new Date()).toISOString() : null
+  };
+  await db.update(orgSettingsTable).set({ onboarding: next }).where(eq(orgSettingsTable.organizationId, organizationId));
+  return next;
+}
+var TEST_LEAD_SOURCE_DETAIL = "onboarding-test-lead";
+async function createTestLead(organizationId) {
+  await deleteTestLeads(organizationId);
+  const [contact] = await db.insert(contactsTable).values({
+    organizationId,
+    firstName: "Taylor",
+    lastName: "Example (Test)"
+    // Deliberately NO email or phone: outreach is skipped, never sent.
+  }).returning();
+  const scoring = await getLeadScoring(organizationId);
+  const intentPoints = Object.values(scoring.intentPoints);
+  const score = Math.min(
+    100,
+    (intentPoints.length ? Math.max(...intentPoints) : 20) + scoring.detailedDescriptionBonus
+  );
+  const [lead] = await db.insert(leadsTable).values({
+    organizationId,
+    contactId: contact.id,
+    status: "new",
+    source: "onboarding-test",
+    sourceDetail: TEST_LEAD_SOURCE_DETAIL,
+    creationMethod: "api",
+    score,
+    summary: "[TEST] Sample inquiry created by the onboarding wizard \u2014 shows how a new lead is captured, scored, and followed up automatically."
+  }).returning();
+  const narrate = (type, description) => db.insert(activitiesTable).values({
+    organizationId,
+    leadId: lead.id,
+    type: "note",
+    title: description,
+    metadata: { onboardingDemo: true, stage: type }
+  });
+  await narrate("captured", "[TEST] Lead captured \u2014 this is where every new inquiry lands, from your website, forms, or connected systems.");
+  await narrate("scored", `[TEST] Lead scored ${score}/100 using your scoring weights, so your team always works the hottest leads first.`);
+  const enrollment = await autoEnrollLead(organizationId, lead.id);
+  const enrolled = enrollment !== null;
+  await narrate(
+    "enrolled",
+    enrolled ? "[TEST] Enrolled in your follow-up playbook. Because this demo contact has no email or phone, every touch is safely skipped \u2014 no real messages are ever sent." : "[TEST] Follow-up playbook not enrolled (it may be disabled) \u2014 real leads matching your rules are enrolled automatically."
+  );
+  await narrate("replied", "[TEST] A reply from the customer would appear here and automatically pause the follow-up sequence.");
+  return { leadId: lead.id, contactId: contact.id, score, enrolled };
+}
+async function deleteTestLeads(organizationId) {
+  const leads = await db.select({ id: leadsTable.id, contactId: leadsTable.contactId }).from(leadsTable).where(
+    and(
+      eq(leadsTable.organizationId, organizationId),
+      eq(leadsTable.sourceDetail, TEST_LEAD_SOURCE_DETAIL)
+    )
+  );
+  if (leads.length === 0) return 0;
+  const leadIds = leads.map((l) => l.id);
+  const contactIds = [...new Set(leads.map((l) => l.contactId).filter((c) => !!c))];
+  await db.transaction(async (tx) => {
+    await tx.delete(scheduledActionsTable).where(
+      and(
+        eq(scheduledActionsTable.organizationId, organizationId),
+        inArray(sql`${scheduledActionsTable.context} ->> 'leadId'`, leadIds)
+      )
+    );
+    await tx.delete(playbookEnrollmentsTable).where(
+      and(
+        eq(playbookEnrollmentsTable.organizationId, organizationId),
+        inArray(playbookEnrollmentsTable.leadId, leadIds)
+      )
+    );
+    await tx.delete(activitiesTable).where(
+      and(
+        eq(activitiesTable.organizationId, organizationId),
+        inArray(activitiesTable.leadId, leadIds)
+      )
+    );
+    await tx.delete(leadsTable).where(
+      and(
+        eq(leadsTable.organizationId, organizationId),
+        inArray(leadsTable.id, leadIds)
+      )
+    );
+    if (contactIds.length > 0) {
+      await tx.delete(contactsTable).where(
+        and(
+          eq(contactsTable.organizationId, organizationId),
+          inArray(contactsTable.id, contactIds)
+        )
+      );
+    }
+  });
+  return leadIds.length;
+}
+
+// src/routes/v1/onboarding.ts
+var router30 = (0, import_express30.Router)();
+router30.get(
+  "/onboarding",
+  requireMember("crm.read"),
+  async (req, res) => {
+    const state = await getOnboardingState(req.member.organizationId);
+    res.json({ steps: [...ONBOARDING_STEPS], state });
+  }
+);
+router30.patch(
+  "/onboarding",
+  requireMember("settings.manage"),
+  async (req, res) => {
+    const body = req.body ?? {};
+    const result = await updateOnboardingState(req.member.organizationId, {
+      completeSteps: Array.isArray(body.completeSteps) ? body.completeSteps.filter((s) => typeof s === "string") : void 0,
+      currentStep: typeof body.currentStep === "string" ? body.currentStep : void 0,
+      launched: body.launched === true ? true : void 0,
+      dismissed: typeof body.dismissed === "boolean" ? body.dismissed : void 0
+    });
+    if ("error" in result) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    res.json({ steps: [...ONBOARDING_STEPS], state: result });
+  }
+);
+router30.post(
+  "/onboarding/test-lead",
+  requireMember("settings.manage"),
+  async (req, res) => {
+    const result = await createTestLead(req.member.organizationId);
+    res.status(201).json(result);
+  }
+);
+router30.delete(
+  "/onboarding/test-lead",
+  requireMember("settings.manage"),
+  async (req, res) => {
+    const removed = await deleteTestLeads(req.member.organizationId);
+    res.json({ removed });
+  }
+);
+var onboarding_default = router30;
+
+// src/routes/v1/reports.ts
+var import_express31 = __toESM(require_express2(), 1);
+
+// src/services/roi-report.ts
+init_src();
+init_drizzle_orm();
+var QUALIFIED_STATUSES = [
+  "ai_qualified",
+  "inspection_scheduled",
+  "inspection_completed",
+  "estimate_preparing",
+  "estimate_sent",
+  "claim_pending",
+  "follow_up",
+  "won",
+  "production_scheduled",
+  "in_progress",
+  "final_walkthrough",
+  "completed",
+  "review_requested"
+];
+var OPEN_PIPELINE_STATUSES = [
+  "new",
+  "ai_qualified",
+  "contact_attempted",
+  "inspection_scheduled",
+  "inspection_completed",
+  "estimate_preparing",
+  "estimate_sent",
+  "claim_pending",
+  "follow_up",
+  "nurture"
+];
+var breakdown = (rows) => rows.map((r) => ({ key: r.key ?? "unknown", count: r.count })).sort((a, b) => b.count - a.count).slice(0, 25);
+async function getRoiReport(organizationId, windowDays2) {
+  const since = new Date(Date.now() - windowDays2 * 864e5);
+  const orgLeads = and(
+    eq(leadsTable.organizationId, organizationId),
+    gte(leadsTable.createdAt, since)
+  );
+  const groupCount = (col) => db.select({ key: col, count: sql`count(*)::int` }).from(leadsTable).where(orgLeads).groupBy(col);
+  const [
+    [totals],
+    bySource,
+    byCampaign,
+    byTool,
+    byLandingPage,
+    byServiceType,
+    [appts],
+    [contactStats],
+    [firstTouchStats],
+    playbookRows,
+    [engagement],
+    [activityCounts],
+    [referralLeads],
+    [reactivationStats],
+    [wonTotals],
+    revenueByAttribution,
+    [pipeline],
+    lostReasons
+  ] = await Promise.all([
+    db.select({
+      total: sql`count(*)::int`,
+      qualified: sql`count(*) filter (where ${leadsTable.status} in ${sql.raw(`('${QUALIFIED_STATUSES.join("','")}')`)})::int`
+    }).from(leadsTable).where(orgLeads),
+    groupCount(leadsTable.source),
+    groupCount(leadsTable.campaign),
+    groupCount(leadsTable.creationMethod),
+    groupCount(leadsTable.landingPage),
+    groupCount(leadsTable.serviceType),
+    db.select({
+      total: sql`count(*)::int`,
+      leadsWith: sql`count(distinct ${appointmentsTable.leadId})::int`
+    }).from(appointmentsTable).where(
+      and(
+        eq(appointmentsTable.organizationId, organizationId),
+        gte(appointmentsTable.createdAt, since)
+      )
+    ),
+    db.select({
+      contacted: sql`count(distinct ${playbookTouchesTable.leadId})::int`,
+      replied: sql`count(distinct ${playbookTouchesTable.leadId}) filter (where ${playbookTouchesTable.repliedAt} is not null)::int`
+    }).from(playbookTouchesTable).where(
+      and(
+        eq(playbookTouchesTable.organizationId, organizationId),
+        gte(playbookTouchesTable.sentAt, since)
+      )
+    ),
+    db.select({
+      median: sql`percentile_cont(0.5) within group (
+          order by extract(epoch from (ft.first_sent - ${leadsTable.createdAt})) / 60
+        )`
+    }).from(leadsTable).innerJoin(
+      sql`(
+          select lead_id, min(sent_at) as first_sent
+          from playbook_touches
+          where organization_id = ${organizationId}
+          group by lead_id
+        ) ft`,
+      sql`ft.lead_id = ${leadsTable.id}`
+    ).where(orgLeads),
+    db.select({
+      playbookId: playbookTouchesTable.playbookId,
+      name: playbooksTable.name,
+      kind: playbooksTable.kind,
+      sent: sql`count(*)::int`,
+      replied: sql`count(${playbookTouchesTable.repliedAt})::int`,
+      booked: sql`count(${playbookTouchesTable.bookedAt})::int`,
+      won: sql`count(*) filter (where ${playbookTouchesTable.finalOutcome} = 'won')::int`
+    }).from(playbookTouchesTable).innerJoin(
+      playbooksTable,
+      eq(playbookTouchesTable.playbookId, playbooksTable.id)
+    ).where(
+      and(
+        eq(playbookTouchesTable.organizationId, organizationId),
+        gte(playbookTouchesTable.sentAt, since)
+      )
+    ).groupBy(
+      playbookTouchesTable.playbookId,
+      playbooksTable.name,
+      playbooksTable.kind
+    ),
+    // Window-bounded: count the timestamped click/submission activities,
+    // not the links' cumulative counters (those are lifetime totals).
+    db.select({
+      reviewClicks: sql`count(*) filter (where ${activitiesTable.type} = 'review_link_clicked')::int`,
+      referralSubmissions: sql`count(*) filter (where ${activitiesTable.type} = 'referral_submitted')::int`
+    }).from(activitiesTable).where(
+      and(
+        eq(activitiesTable.organizationId, organizationId),
+        inArray(activitiesTable.type, [
+          "review_link_clicked",
+          "referral_submitted"
+        ]),
+        gte(activitiesTable.occurredAt, since)
+      )
+    ),
+    db.select({
+      reviewSent: sql`count(*) filter (where pb.seed_key = 'post_sale.review_request' or pb.name ilike '%review%')::int`,
+      referralSent: sql`count(*) filter (where pb.seed_key = 'post_sale.referral_request' or pb.name ilike '%referral%')::int`
+    }).from(playbookTouchesTable).innerJoin(
+      sql`${playbooksTable} pb`,
+      sql`pb.id = ${playbookTouchesTable.playbookId} and pb.kind = 'post_sale'`
+    ).where(
+      and(
+        eq(playbookTouchesTable.organizationId, organizationId),
+        gte(playbookTouchesTable.sentAt, since)
+      )
+    ),
+    db.select({ count: sql`count(*)::int` }).from(leadsTable).where(and(orgLeads, eq(leadsTable.source, "referral"))),
+    db.select({
+      campaigns: sql`count(distinct c.id)::int`,
+      enrolled: sql`count(cl.id) filter (where cl.status = 'enrolled')::int`,
+      replied: sql`count(distinct cl.lead_id) filter (where e.pause_reason ilike '%repl%')::int`
+    }).from(sql`${reactivationCampaignsTable} c`).leftJoin(sql`${reactivationCampaignLeadsTable} cl`, sql`cl.campaign_id = c.id`).leftJoin(sql`${playbookEnrollmentsTable} e`, sql`e.id = cl.enrollment_id`).where(
+      sql`c.organization_id = ${organizationId} and coalesce(c.launched_at, c.created_at) >= ${since}`
+    ),
+    db.select({
+      won: sql`count(*)::int`,
+      revenue: sql`coalesce(sum(${leadsTable.wonRevenueCents}), 0)::bigint`
+    }).from(leadsTable).where(
+      and(
+        eq(leadsTable.organizationId, organizationId),
+        gte(leadsTable.wonAt, since)
+      )
+    ),
+    db.select({
+      category: leadsTable.wonAttribution,
+      count: sql`count(*)::int`,
+      revenueCents: sql`coalesce(sum(${leadsTable.wonRevenueCents}), 0)::bigint`
+    }).from(leadsTable).where(
+      and(
+        eq(leadsTable.organizationId, organizationId),
+        gte(leadsTable.wonAt, since)
+      )
+    ).groupBy(leadsTable.wonAttribution),
+    db.select({
+      value: sql`coalesce(sum(${leadsTable.estimatedValueCents}), 0)::bigint`
+    }).from(leadsTable).where(
+      and(
+        eq(leadsTable.organizationId, organizationId),
+        inArray(leadsTable.status, OPEN_PIPELINE_STATUSES)
+      )
+    ),
+    db.select({
+      key: leadsTable.lostReason,
+      count: sql`count(*)::int`
+    }).from(leadsTable).where(
+      and(
+        eq(leadsTable.organizationId, organizationId),
+        eq(leadsTable.status, "lost"),
+        gte(leadsTable.updatedAt, since)
+      )
+    ).groupBy(leadsTable.lostReason)
+  ]);
+  const lostCount = lostReasons.reduce((n, r) => n + r.count, 0);
+  const pct = (num, den) => den > 0 ? Math.round(num / den * 100) : null;
+  return {
+    windowDays: windowDays2,
+    generatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    leads: {
+      total: totals.total,
+      qualified: totals.qualified,
+      bySource: breakdown(bySource),
+      byCampaign: breakdown(byCampaign),
+      byTool: breakdown(byTool),
+      byLandingPage: breakdown(byLandingPage),
+      byServiceType: breakdown(byServiceType)
+    },
+    appointments: {
+      total: appts.total,
+      leadsWithAppointment: appts.leadsWith,
+      appointmentRatePct: pct(appts.leadsWith, totals.total)
+    },
+    responsiveness: {
+      leadsContacted: contactStats.contacted,
+      leadsReplied: contactStats.replied,
+      responseRatePct: pct(contactStats.replied, contactStats.contacted),
+      medianMinutesToFirstTouch: firstTouchStats?.median != null ? Math.round(Number(firstTouchStats.median)) : null
+    },
+    playbooks: playbookRows.sort((a, b) => b.sent - a.sent),
+    reviewsAndReferrals: {
+      reviewRequestsSent: activityCounts?.reviewSent ?? 0,
+      reviewLinkClicks: engagement?.reviewClicks ?? 0,
+      referralRequestsSent: activityCounts?.referralSent ?? 0,
+      referralSubmissions: engagement?.referralSubmissions ?? 0,
+      referralLeads: referralLeads?.count ?? 0
+    },
+    reactivation: {
+      campaignsLaunched: reactivationStats?.campaigns ?? 0,
+      leadsEnrolled: reactivationStats?.enrolled ?? 0,
+      leadsReplied: reactivationStats?.replied ?? 0
+    },
+    outcomes: {
+      won: wonTotals.won,
+      revenueWonCents: Number(wonTotals.revenue),
+      revenueByAttribution: revenueByAttribution.map((r) => ({
+        category: r.category ?? "unknown",
+        count: r.count,
+        revenueCents: Number(r.revenueCents)
+      })).sort((a, b) => b.revenueCents - a.revenueCents),
+      pipelineValueCents: Number(pipeline.value),
+      lost: lostCount,
+      lostReasons: breakdown(lostReasons)
+    }
+  };
+}
+function roiReportToCsv(report) {
+  const esc = (v) => {
+    const s = String(v ?? "");
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const rows = [
+    ["section", "metric", "key", "value"],
+    ["meta", "window_days", "", report.windowDays],
+    ["meta", "generated_at", "", report.generatedAt],
+    ["leads", "total", "", report.leads.total],
+    ["leads", "qualified", "", report.leads.qualified],
+    ...report.leads.bySource.map((r) => ["leads", "by_source", r.key, r.count]),
+    ...report.leads.byCampaign.map((r) => ["leads", "by_campaign", r.key, r.count]),
+    ...report.leads.byTool.map((r) => ["leads", "by_tool", r.key, r.count]),
+    ...report.leads.byLandingPage.map((r) => ["leads", "by_landing_page", r.key, r.count]),
+    ...report.leads.byServiceType.map((r) => ["leads", "by_service_type", r.key, r.count]),
+    ["appointments", "total", "", report.appointments.total],
+    ["appointments", "leads_with_appointment", "", report.appointments.leadsWithAppointment],
+    ["appointments", "appointment_rate_pct", "", report.appointments.appointmentRatePct],
+    ["responsiveness", "leads_contacted", "", report.responsiveness.leadsContacted],
+    ["responsiveness", "leads_replied", "", report.responsiveness.leadsReplied],
+    ["responsiveness", "response_rate_pct", "", report.responsiveness.responseRatePct],
+    ["responsiveness", "median_minutes_to_first_touch", "", report.responsiveness.medianMinutesToFirstTouch],
+    ...report.playbooks.flatMap((p) => [
+      ["playbooks", "sent", p.name, p.sent],
+      ["playbooks", "replied", p.name, p.replied],
+      ["playbooks", "booked", p.name, p.booked],
+      ["playbooks", "won", p.name, p.won]
+    ]),
+    ["reviews_referrals", "review_requests_sent", "", report.reviewsAndReferrals.reviewRequestsSent],
+    ["reviews_referrals", "review_link_clicks", "", report.reviewsAndReferrals.reviewLinkClicks],
+    ["reviews_referrals", "referral_requests_sent", "", report.reviewsAndReferrals.referralRequestsSent],
+    ["reviews_referrals", "referral_submissions", "", report.reviewsAndReferrals.referralSubmissions],
+    ["reviews_referrals", "referral_leads", "", report.reviewsAndReferrals.referralLeads],
+    ["reactivation", "campaigns_launched", "", report.reactivation.campaignsLaunched],
+    ["reactivation", "leads_enrolled", "", report.reactivation.leadsEnrolled],
+    ["reactivation", "leads_replied", "", report.reactivation.leadsReplied],
+    ["outcomes", "won", "", report.outcomes.won],
+    ["outcomes", "revenue_won_cents", "", report.outcomes.revenueWonCents],
+    ...report.outcomes.revenueByAttribution.flatMap((r) => [
+      ["outcomes", "revenue_by_attribution_cents", r.category, r.revenueCents],
+      ["outcomes", "won_by_attribution", r.category, r.count]
+    ]),
+    ["outcomes", "pipeline_value_cents", "", report.outcomes.pipelineValueCents],
+    ["outcomes", "lost", "", report.outcomes.lost],
+    ...report.outcomes.lostReasons.map((r) => ["outcomes", "lost_reason", r.key, r.count])
+  ];
+  return rows.map((r) => r.map(esc).join(",")).join("\n") + "\n";
+}
+
+// src/routes/v1/reports.ts
+var router31 = (0, import_express31.Router)();
+function windowDays(req) {
+  const days = Number(req.query.days ?? 30);
+  if (!Number.isFinite(days)) return 30;
+  return Math.min(365, Math.max(1, Math.floor(days)));
+}
+router31.get(
+  "/reports/roi",
+  requireMember("crm.read"),
+  async (req, res) => {
+    const report = await getRoiReport(
+      req.member.organizationId,
+      windowDays(req)
+    );
+    res.json(report);
+  }
+);
+router31.get(
+  "/reports/roi/export",
+  requireMember("crm.read"),
+  async (req, res) => {
+    const report = await getRoiReport(
+      req.member.organizationId,
+      windowDays(req)
+    );
+    res.status(200).set({
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="roi-report-${report.windowDays}d.csv"`
+    }).send(roiReportToCsv(report));
+  }
+);
+var reports_default = router31;
 
 // src/routes/v1/index.ts
-var router28 = (0, import_express28.Router)();
-router28.use(me_default);
-router28.use(contacts_default);
-router28.use(leads_default);
-router28.use(estimates_default);
-router28.use(projects_default);
-router28.use(tasks_default);
-router28.use(appointments_default);
-router28.use(dashboard_default);
-router28.use(assistant_default);
-router28.use(settings_default);
-router28.use(api_keys_default);
-router28.use(installation_default);
-router28.use(knowledge_default);
-router28.use(forms_default);
-router28.use(templates_default);
-router28.use(automations_default);
-router28.use(playbooks_default);
-router28.use(reactivation_default);
-router28.use(webhooks_default);
-router28.use(tags_default);
-router28.use(public_default);
-router28.use(unsubscribe_default);
-router28.use(storage_default);
-router28.use(portal_default);
-router28.use(google_reviews_default);
-var v1_default = router28;
+var router32 = (0, import_express32.Router)();
+router32.use(me_default);
+router32.use(contacts_default);
+router32.use(leads_default);
+router32.use(estimates_default);
+router32.use(projects_default);
+router32.use(tasks_default);
+router32.use(appointments_default);
+router32.use(dashboard_default);
+router32.use(reports_default);
+router32.use(assistant_default);
+router32.use(settings_default);
+router32.use(api_keys_default);
+router32.use(installation_default);
+router32.use(knowledge_default);
+router32.use(forms_default);
+router32.use(templates_default);
+router32.use(automations_default);
+router32.use(playbooks_default);
+router32.use(reactivation_default);
+router32.use(capture_default);
+router32.use(webhooks_default);
+router32.use(tags_default);
+router32.use(public_default);
+router32.use(unsubscribe_default);
+router32.use(storage_default);
+router32.use(portal_default);
+router32.use(google_reviews_default);
+router32.use(orgs_default);
+router32.use(onboarding_default);
+var v1_default = router32;
 
 // src/routes/index.ts
-var router29 = (0, import_express29.Router)();
-router29.use(health_default);
-router29.use(auth_default);
-router29.use("/v1", v1_default);
-var routes_default = router29;
+var router33 = (0, import_express33.Router)();
+router33.use(health_default);
+router33.use(auth_default);
+router33.use("/v1", v1_default);
+var routes_default = router33;
 
 // src/app.ts
 init_logger2();
@@ -69409,7 +72012,7 @@ async function authMiddleware(req, res, next) {
 }
 
 // src/app.ts
-var app = (0, import_express30.default)();
+var app = (0, import_express34.default)();
 app.set("trust proxy", 1);
 app.use(
   (0, import_pino_http.default)({
@@ -69434,11 +72037,11 @@ app.use((0, import_cors.default)({ origin: true, credentials: true }));
 app.use((0, import_cookie_parser.default)());
 app.use(
   "/api/v1/public/concierge/transcriptions",
-  import_express30.default.json({ limit: "8mb" })
+  import_express34.default.json({ limit: "8mb" })
 );
-app.use("/api/v1/lead-imports", import_express30.default.json({ limit: "8mb" }));
-app.use(import_express30.default.json());
-app.use(import_express30.default.urlencoded({ extended: true }));
+app.use("/api/v1/lead-imports", import_express34.default.json({ limit: "8mb" }));
+app.use(import_express34.default.json());
+app.use(import_express34.default.urlencoded({ extended: true }));
 app.use(authMiddleware);
 app.use("/api", routes_default);
 var app_default = app;
@@ -69464,6 +72067,9 @@ app_default.listen(port, (err) => {
   }
   logger.info({ port }, "Server listening");
   startAutomationScheduler();
+  void ensurePlatformAdmins().catch(
+    (err2) => logger.error({ err: err2 }, "Ensuring platform admins failed")
+  );
   void (async () => {
     const orgs = await db.select({ id: organizationsTable.id }).from(organizationsTable);
     for (const org of orgs) {

@@ -41,7 +41,7 @@ async function runFullFlow() {
   const say = (content: string) =>
     handleMessage({ organizationId: org.id, conversationId: start.conversationId, content });
 
-  await say("Roof repair");
+  await say("Request a quote");
   await say("A few shingles blew off last week.");
   await say("Auto Mation");
   await say("+15550001111");

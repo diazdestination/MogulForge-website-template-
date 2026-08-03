@@ -36,6 +36,11 @@ export const usersTable = pgTable("users", {
     () => organizationsTable.id,
   ),
   role: userRoleEnum("role").notNull().default("viewer"),
+  /**
+   * Platform-level super admin (MogulForge operator): may list and manage
+   * ALL organizations. Distinct from org "owner", which is scoped to one org.
+   */
+  isPlatformAdmin: boolean("is_platform_admin").notNull().default(false),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
