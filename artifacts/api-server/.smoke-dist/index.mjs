@@ -14070,6 +14070,13 @@ var init_contacts = __esm({
         preferredContactMethod: text("preferred_contact_method"),
         /** Hard do-not-contact flag: blocks ALL automated outreach on every channel. */
         doNotContact: boolean("do_not_contact").notNull().default(false),
+        /**
+         * Per-channel do-not-contact flags, set automatically on hard bounce /
+         * unsubscribe / STOP. Blocks that channel only — the other channel can
+         * keep sending (subject to its own consent and suppression checks).
+         */
+        doNotContactEmail: boolean("do_not_contact_email").notNull().default(false),
+        doNotContactSms: boolean("do_not_contact_sms").notNull().default(false),
         createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
         updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => /* @__PURE__ */ new Date())
       },
@@ -15208,6 +15215,18 @@ var init_playbook_learning = __esm({
         /** UTC hour (0-23) the touch went out — send-window learning input. */
         sentHourUtc: integer("sent_hour_utc").notNull(),
         sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+        /**
+         * Provider message id (Resend email id / Twilio message SID) — lets
+         * delivery webhooks correlate back to the exact touch they refer to.
+         */
+        providerMessageId: text("provider_message_id"),
+        /**
+         * Delivery signal from the provider: null until observed, then
+         * "delivered" | "bounced" | "unsubscribed". Bounce/unsubscribe always
+         * wins over delivered (a recipient can open then unsubscribe).
+         */
+        delivery: text("delivery"),
+        deliveryAt: timestamp("delivery_at", { withTimezone: true }),
         /** Outcome chain: null until the corresponding event is observed. */
         repliedAt: timestamp("replied_at", { withTimezone: true }),
         bookedAt: timestamp("booked_at", { withTimezone: true }),
@@ -15225,7 +15244,8 @@ var init_playbook_learning = __esm({
         index("playbook_touches_org_lead_idx").on(
           table.organizationId,
           table.leadId
-        )
+        ),
+        index("playbook_touches_provider_msg_idx").on(table.providerMessageId)
       ]
     );
     playbookDecisionsTable = pgTable(
@@ -36817,27 +36837,27 @@ var require_router = __commonJS({
     var slice = Array.prototype.slice;
     var flatten = Array.prototype.flat;
     var methods = METHODS.map((method) => method.toLowerCase());
-    module.exports = Router34;
+    module.exports = Router35;
     module.exports.Route = Route;
-    function Router34(options) {
-      if (!(this instanceof Router34)) {
-        return new Router34(options);
+    function Router35(options) {
+      if (!(this instanceof Router35)) {
+        return new Router35(options);
       }
       const opts = options || {};
-      function router34(req, res, next) {
-        router34.handle(req, res, next);
+      function router35(req, res, next) {
+        router35.handle(req, res, next);
       }
-      Object.setPrototypeOf(router34, this);
-      router34.caseSensitive = opts.caseSensitive;
-      router34.mergeParams = opts.mergeParams;
-      router34.params = {};
-      router34.strict = opts.strict;
-      router34.stack = [];
-      return router34;
+      Object.setPrototypeOf(router35, this);
+      router35.caseSensitive = opts.caseSensitive;
+      router35.mergeParams = opts.mergeParams;
+      router35.params = {};
+      router35.strict = opts.strict;
+      router35.stack = [];
+      return router35;
     }
-    Router34.prototype = function() {
+    Router35.prototype = function() {
     };
-    Router34.prototype.param = function param(name, fn) {
+    Router35.prototype.param = function param(name, fn) {
       if (!name) {
         throw new TypeError("argument name is required");
       }
@@ -36857,7 +36877,7 @@ var require_router = __commonJS({
       params.push(fn);
       return this;
     };
-    Router34.prototype.handle = function handle(req, res, callback) {
+    Router35.prototype.handle = function handle(req, res, callback) {
       if (!callback) {
         throw new TypeError("argument callback is required");
       }
@@ -36984,7 +37004,7 @@ var require_router = __commonJS({
         }
       }
     };
-    Router34.prototype.use = function use(handler) {
+    Router35.prototype.use = function use(handler) {
       let offset = 0;
       let path2 = "/";
       if (typeof handler !== "function") {
@@ -37017,7 +37037,7 @@ var require_router = __commonJS({
       }
       return this;
     };
-    Router34.prototype.route = function route(path2) {
+    Router35.prototype.route = function route(path2) {
       const route2 = new Route(path2);
       const layer = new Layer(path2, {
         sensitive: this.caseSensitive,
@@ -37032,7 +37052,7 @@ var require_router = __commonJS({
       return route2;
     };
     methods.concat("all").forEach(function(method) {
-      Router34.prototype[method] = function(path2) {
+      Router35.prototype[method] = function(path2) {
         const route = this.route(path2);
         route[method].apply(route, slice.call(arguments, 1));
         return this;
@@ -37215,13 +37235,13 @@ var require_application = __commonJS({
     var compileTrust = require_utils5().compileTrust;
     var resolve = __require("node:path").resolve;
     var once = require_once();
-    var Router34 = require_router();
+    var Router35 = require_router();
     var slice = Array.prototype.slice;
     var flatten = Array.prototype.flat;
     var app2 = exports = module.exports = {};
     var trustProxyDefaultSymbol = "@@symbol:trust_proxy_default";
     app2.init = function init() {
-      var router34 = null;
+      var router35 = null;
       this.cache = /* @__PURE__ */ Object.create(null);
       this.engines = /* @__PURE__ */ Object.create(null);
       this.settings = /* @__PURE__ */ Object.create(null);
@@ -37230,13 +37250,13 @@ var require_application = __commonJS({
         configurable: true,
         enumerable: true,
         get: function getrouter() {
-          if (router34 === null) {
-            router34 = new Router34({
+          if (router35 === null) {
+            router35 = new Router35({
               caseSensitive: this.enabled("case sensitive routing"),
               strict: this.enabled("strict routing")
             });
           }
-          return router34;
+          return router35;
         }
       });
     };
@@ -37307,15 +37327,15 @@ var require_application = __commonJS({
       if (fns.length === 0) {
         throw new TypeError("app.use() requires a middleware function");
       }
-      var router34 = this.router;
+      var router35 = this.router;
       fns.forEach(function(fn2) {
         if (!fn2 || !fn2.handle || !fn2.set) {
-          return router34.use(path2, fn2);
+          return router35.use(path2, fn2);
         }
         debug(".use app under %s", path2);
         fn2.mountpath = path2;
         fn2.parent = this;
-        router34.use(path2, function mounted_app(req, res, next) {
+        router35.use(path2, function mounted_app(req, res, next) {
           var orig = req.app;
           fn2.handle(req, res, function(err) {
             Object.setPrototypeOf(req, orig.request);
@@ -39900,7 +39920,7 @@ var require_express = __commonJS({
     var EventEmitter = __require("node:events").EventEmitter;
     var mixin = require_merge_descriptors();
     var proto = require_application();
-    var Router34 = require_router();
+    var Router35 = require_router();
     var req = require_request();
     var res = require_response();
     exports = module.exports = createApplication;
@@ -39922,8 +39942,8 @@ var require_express = __commonJS({
     exports.application = proto;
     exports.request = req;
     exports.response = res;
-    exports.Route = Router34.Route;
-    exports.Router = Router34;
+    exports.Route = Router35.Route;
+    exports.Router = Router35;
     exports.json = bodyParser.json;
     exports.raw = bodyParser.raw;
     exports.static = require_serve_static();
@@ -46190,6 +46210,12 @@ async function checkSendEligibility(input) {
   if (contact.doNotContact) {
     return { ok: false, outcome: "blocked", reason: "do_not_contact" };
   }
+  if (channel === "email" && contact.doNotContactEmail) {
+    return { ok: false, outcome: "blocked", reason: "do_not_contact_email" };
+  }
+  if (channel === "sms" && contact.doNotContactSms) {
+    return { ok: false, outcome: "blocked", reason: "do_not_contact_sms" };
+  }
   const raw = channel === "email" ? contact.email : contact.phone;
   if (!raw) {
     return { ok: false, outcome: "blocked", reason: `no_${channel === "email" ? "email" : "phone"}` };
@@ -46275,6 +46301,8 @@ async function recordBlockedSend(input) {
 function humanReason(reason) {
   const map = {
     do_not_contact: "contact is marked do-not-contact",
+    do_not_contact_email: "contact is marked do-not-email",
+    do_not_contact_sms: "contact is marked do-not-text",
     no_email: "no email address",
     no_phone: "no phone number",
     invalid_email: "invalid email address",
@@ -46670,6 +46698,9 @@ async function getConversionInsights(organizationId) {
     variantKey: playbookTouchesTable.variantKey,
     channel: playbookTouchesTable.channel,
     sent: sql`count(*)::int`,
+    delivered: sql`count(*) filter (where ${playbookTouchesTable.delivery} = 'delivered')::int`,
+    bounced: sql`count(*) filter (where ${playbookTouchesTable.delivery} = 'bounced')::int`,
+    unsubscribed: sql`count(*) filter (where ${playbookTouchesTable.delivery} = 'unsubscribed')::int`,
     replied: sql`count(${playbookTouchesTable.repliedAt})::int`,
     booked: sql`count(${playbookTouchesTable.bookedAt})::int`,
     won: sql`count(*) filter (where ${playbookTouchesTable.finalOutcome} = 'won')::int`,
@@ -47127,7 +47158,8 @@ Know someone we can help? Pass along their name: ${engagementLinkUrl(link)}`;
       stepIndex,
       variantKey: variant.key,
       channel: step.channel,
-      provider: sendResult.provider
+      provider: sendResult.provider,
+      providerMessageId: sendResult.id
     });
     await db.insert(activitiesTable).values({
       organizationId,
@@ -52050,7 +52082,9 @@ async function executeAction(organizationId, action, context, automationId) {
         email: contactsTable.email,
         phone: contactsTable.phone,
         preferredContactMethod: contactsTable.preferredContactMethod,
-        doNotContact: contactsTable.doNotContact
+        doNotContact: contactsTable.doNotContact,
+        doNotContactEmail: contactsTable.doNotContactEmail,
+        doNotContactSms: contactsTable.doNotContactSms
       }).from(contactsTable).where(
         and(
           eq(contactsTable.id, contactId),
@@ -52225,7 +52259,9 @@ async function renderTemplate(organizationId, action, context) {
       firstName: contactsTable.firstName,
       email: contactsTable.email,
       phone: contactsTable.phone,
-      doNotContact: contactsTable.doNotContact
+      doNotContact: contactsTable.doNotContact,
+      doNotContactEmail: contactsTable.doNotContactEmail,
+      doNotContactSms: contactsTable.doNotContactSms
     }).from(contactsTable).where(
       and(
         eq(contactsTable.id, contactId),
@@ -57140,13 +57176,13 @@ var require_lib6 = __commonJS({
 init_src();
 
 // src/app.ts
-var import_express34 = __toESM(require_express2(), 1);
+var import_express35 = __toESM(require_express2(), 1);
 var import_cookie_parser = __toESM(require_cookie_parser(), 1);
 var import_cors = __toESM(require_lib5(), 1);
 var import_pino_http = __toESM(require_logger(), 1);
 
 // src/routes/index.ts
-var import_express33 = __toESM(require_express2(), 1);
+var import_express34 = __toESM(require_express2(), 1);
 
 // ../../lib/api-zod/src/generated/api.ts
 import * as zod from "zod";
@@ -59846,6 +59882,9 @@ var GetPlaybookInsightsResponse = zod.object({
     "variantKey": zod.string(),
     "channel": zod.string(),
     "sent": zod.number(),
+    "delivered": zod.number(),
+    "bounced": zod.number(),
+    "unsubscribed": zod.number(),
     "replied": zod.number(),
     "booked": zod.number(),
     "won": zod.number(),
@@ -62579,7 +62618,7 @@ router2.get("/healthz", (_req, res) => {
 var health_default = router2;
 
 // src/routes/v1/index.ts
-var import_express32 = __toESM(require_express2(), 1);
+var import_express33 = __toESM(require_express2(), 1);
 
 // src/routes/v1/api-keys.ts
 var import_express3 = __toESM(require_express2(), 1);
@@ -69944,9 +69983,189 @@ init_drizzle_orm();
 var import_express18 = __toESM(require_express2(), 1);
 init_rateLimit();
 init_audit2();
+import { createHmac as createHmac3 } from "node:crypto";
+
+// src/services/delivery-events.ts
+init_src();
+init_drizzle_orm();
+init_audit2();
+init_send_gate();
+function channelNoun(channel) {
+  return channel === "email" ? "email" : "text";
+}
+async function recordTouchDelivery(input) {
+  const { providerMessageId, signal: signal3, detail } = input;
+  if (!providerMessageId) return null;
+  const now = /* @__PURE__ */ new Date();
+  const guard = signal3 === "delivered" ? (
+    // delivered only fills an empty slot
+    isNull(playbookTouchesTable.delivery)
+  ) : (
+    // bounce/unsubscribe always win
+    or(
+      isNull(playbookTouchesTable.delivery),
+      eq(playbookTouchesTable.delivery, "delivered")
+    )
+  );
+  const [touch] = await db.update(playbookTouchesTable).set({ delivery: signal3, deliveryAt: now }).where(
+    and(eq(playbookTouchesTable.providerMessageId, providerMessageId), guard)
+  ).returning();
+  if (!touch) {
+    const [existing] = await db.select().from(playbookTouchesTable).where(eq(playbookTouchesTable.providerMessageId, providerMessageId));
+    return existing ?? null;
+  }
+  if (signal3 !== "delivered") {
+    const channel = touch.channel;
+    await db.insert(activitiesTable).values({
+      organizationId: touch.organizationId,
+      leadId: touch.leadId,
+      type: signal3 === "bounced" ? "message_bounced" : "message_unsubscribed",
+      title: signal3 === "bounced" ? `Outreach ${channelNoun(channel)} bounced` : `Recipient unsubscribed from automated ${channelNoun(channel)}s`,
+      metadata: {
+        channel,
+        provider: touch.provider,
+        providerMessageId,
+        stepIndex: touch.stepIndex,
+        detail: detail ?? null
+      }
+    });
+  }
+  return touch;
+}
+async function suppressChannelForContact(input) {
+  const { organizationId, contactId, channel, reason, source, detail } = input;
+  try {
+    const [contact] = await db.update(contactsTable).set(
+      channel === "email" ? { doNotContactEmail: true } : { doNotContactSms: true }
+    ).where(
+      and(
+        eq(contactsTable.id, contactId),
+        eq(contactsTable.organizationId, organizationId)
+      )
+    ).returning();
+    if (!contact) return;
+    const address = channel === "email" ? contact.email : contact.phone;
+    if (address) {
+      await addSuppression({
+        organizationId,
+        channel,
+        value: address,
+        reason,
+        source,
+        detail
+      });
+    }
+    await recordAudit({
+      organizationId,
+      action: "send.channel_suppressed",
+      entityType: "contact",
+      entityId: contactId,
+      metadata: { channel, reason, source }
+    });
+  } catch (err) {
+    console.error("[delivery-events] suppressChannelForContact failed:", err);
+  }
+}
+async function recordContactOptOut(input) {
+  const { organizationId, contactId, channel, source } = input;
+  try {
+    await suppressChannelForContact({
+      organizationId,
+      contactId,
+      channel,
+      reason: channel === "email" ? "unsubscribed" : "stop_keyword",
+      source
+    });
+    const leads = await db.select({ id: leadsTable.id }).from(leadsTable).where(
+      and(
+        eq(leadsTable.organizationId, organizationId),
+        eq(leadsTable.contactId, contactId)
+      )
+    );
+    const leadIds = leads.map((l) => l.id);
+    if (leadIds.length === 0) return;
+    const now = /* @__PURE__ */ new Date();
+    await db.update(playbookTouchesTable).set({ delivery: "unsubscribed", deliveryAt: now }).where(
+      and(
+        eq(playbookTouchesTable.organizationId, organizationId),
+        inArray(playbookTouchesTable.leadId, leadIds),
+        eq(playbookTouchesTable.channel, channel),
+        or(
+          isNull(playbookTouchesTable.delivery),
+          eq(playbookTouchesTable.delivery, "delivered")
+        )
+      )
+    );
+    for (const leadId of leadIds) {
+      await db.insert(activitiesTable).values({
+        organizationId,
+        leadId,
+        contactId,
+        type: "message_unsubscribed",
+        title: channel === "email" ? "Recipient unsubscribed from automated emails" : "Recipient texted STOP \u2014 automated texts stopped",
+        metadata: { channel, source }
+      });
+    }
+  } catch (err) {
+    console.error("[delivery-events] recordContactOptOut failed:", err);
+  }
+}
+async function handleBounce(input) {
+  const touch = await recordTouchDelivery({
+    providerMessageId: input.providerMessageId,
+    signal: "bounced",
+    detail: input.detail
+  });
+  if (touch) {
+    const [lead] = await db.select({ contactId: leadsTable.contactId }).from(leadsTable).where(eq(leadsTable.id, touch.leadId));
+    if (lead?.contactId) {
+      await suppressChannelForContact({
+        organizationId: touch.organizationId,
+        contactId: lead.contactId,
+        channel: input.channel,
+        reason: input.reason,
+        source: input.source,
+        detail: input.detail
+      });
+    }
+    return;
+  }
+  if (!input.address) return;
+  const matches = input.channel === "email" ? await db.select({ id: contactsTable.id, organizationId: contactsTable.organizationId }).from(contactsTable).where(sql`lower(coalesce(${contactsTable.email}, '')) = ${input.address.trim().toLowerCase()}`) : await db.select({ id: contactsTable.id, organizationId: contactsTable.organizationId }).from(contactsTable).where(
+    sql`regexp_replace(coalesce(${contactsTable.phone}, ''), '\\D', '', 'g') LIKE ${"%" + input.address.replace(/\D+/g, "").slice(-10)}`
+  );
+  for (const contact of matches) {
+    await suppressChannelForContact({
+      organizationId: contact.organizationId,
+      contactId: contact.id,
+      channel: input.channel,
+      reason: input.reason,
+      source: input.source,
+      detail: input.detail
+    });
+  }
+}
+var TWILIO_PERMANENT_ERROR_CODES = /* @__PURE__ */ new Set([
+  "21211",
+  // invalid 'To' number
+  "21610",
+  // recipient on Twilio's STOP list
+  "21614",
+  // not a mobile number
+  "30004",
+  // blocked by recipient/carrier
+  "30005",
+  // unknown destination
+  "30006"
+  // landline / unreachable carrier
+]);
+function isPermanentTwilioError(errorCode) {
+  return Boolean(errorCode && TWILIO_PERMANENT_ERROR_CODES.has(errorCode));
+}
+
+// src/routes/v1/unsubscribe.ts
 init_playbooks2();
 init_send_gate();
-import { createHmac as createHmac3 } from "node:crypto";
 var router18 = (0, import_express18.Router)();
 function page(title, body) {
   return `<!doctype html>
@@ -69992,11 +70211,10 @@ router18.post(
       )
     );
     if (contact?.email) {
-      await addSuppression({
+      await recordContactOptOut({
         organizationId,
+        contactId: contact.id,
         channel: "email",
-        value: contact.email,
-        reason: "unsubscribed",
         source: "unsubscribe_link"
       });
       await db.insert(consentRecordsTable).values({
@@ -70065,6 +70283,7 @@ router18.post(
       sql`regexp_replace(coalesce(${contactsTable.phone}, ''), '\\D', '', 'g') LIKE ${"%" + last10}`
     );
     const seenOrgs = /* @__PURE__ */ new Set();
+    const orgLifted = /* @__PURE__ */ new Map();
     for (const contact of matches) {
       if (STOP_WORDS2.has(keyword)) {
         if (!seenOrgs.has(contact.organizationId)) {
@@ -70078,6 +70297,12 @@ router18.post(
             detail: keyword
           });
         }
+        await recordContactOptOut({
+          organizationId: contact.organizationId,
+          contactId: contact.id,
+          channel: "sms",
+          source: "twilio_inbound"
+        });
         await db.insert(consentRecordsTable).values({
           organizationId: contact.organizationId,
           contactId: contact.id,
@@ -70098,11 +70323,16 @@ router18.post(
           metadata: { keyword }
         });
       } else {
-        const removed = await removeSuppressionIfStopKeyword(
-          contact.organizationId,
-          from
-        );
+        let removed = orgLifted.get(contact.organizationId);
+        if (removed === void 0) {
+          removed = await removeSuppressionIfStopKeyword(
+            contact.organizationId,
+            from
+          );
+          orgLifted.set(contact.organizationId, removed);
+        }
         if (removed) {
+          await db.update(contactsTable).set({ doNotContactSms: false }).where(eq(contactsTable.id, contact.id));
           await db.insert(consentRecordsTable).values({
             organizationId: contact.organizationId,
             contactId: contact.id,
@@ -71926,45 +72156,153 @@ router31.get(
 );
 var reports_default = router31;
 
-// src/routes/v1/index.ts
+// src/routes/v1/delivery-status.ts
+var import_express32 = __toESM(require_express2(), 1);
+init_rateLimit();
+import { createHmac as createHmac4, timingSafeEqual as timingSafeEqual4 } from "node:crypto";
 var router32 = (0, import_express32.Router)();
-router32.use(me_default);
-router32.use(contacts_default);
-router32.use(leads_default);
-router32.use(estimates_default);
-router32.use(projects_default);
-router32.use(tasks_default);
-router32.use(appointments_default);
-router32.use(dashboard_default);
-router32.use(reports_default);
-router32.use(assistant_default);
-router32.use(settings_default);
-router32.use(api_keys_default);
-router32.use(installation_default);
-router32.use(knowledge_default);
-router32.use(forms_default);
-router32.use(templates_default);
-router32.use(automations_default);
-router32.use(playbooks_default);
-router32.use(reactivation_default);
-router32.use(capture_default);
-router32.use(webhooks_default);
-router32.use(tags_default);
-router32.use(public_default);
-router32.use(unsubscribe_default);
-router32.use(storage_default);
-router32.use(portal_default);
-router32.use(google_reviews_default);
-router32.use(orgs_default);
-router32.use(onboarding_default);
-var v1_default = router32;
+function resendSignatureValid(req) {
+  const secret = process.env.RESEND_WEBHOOK_SECRET;
+  if (!secret) return true;
+  const id = req.headers["svix-id"];
+  const timestamp2 = req.headers["svix-timestamp"];
+  const signatures = req.headers["svix-signature"];
+  if (typeof id !== "string" || typeof timestamp2 !== "string" || typeof signatures !== "string") {
+    return false;
+  }
+  const ts = Number(timestamp2);
+  if (!Number.isFinite(ts) || Math.abs(Date.now() / 1e3 - ts) > 300) {
+    return false;
+  }
+  const rawBody = req.rawBody;
+  const payload = rawBody ? rawBody.toString("utf8") : JSON.stringify(req.body);
+  const key = Buffer.from(secret.replace(/^whsec_/, ""), "base64");
+  const expected = createHmac4("sha256", key).update(`${id}.${timestamp2}.${payload}`, "utf8").digest("base64");
+  return signatures.split(" ").some((part) => {
+    const sig = part.split(",")[1] ?? "";
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expected);
+    return a.length === b.length && timingSafeEqual4(a, b);
+  });
+}
+router32.post(
+  "/public/webhooks/resend",
+  rateLimit({ windowMs: 6e4, max: 120, key: "resend-webhook" }),
+  async (req, res) => {
+    if (!resendSignatureValid(req)) {
+      res.status(403).json({ error: "invalid signature" });
+      return;
+    }
+    const type = typeof req.body?.type === "string" ? req.body.type : "";
+    const data = req.body?.data ?? {};
+    const messageId = typeof data.email_id === "string" ? data.email_id : "";
+    const to = Array.isArray(data.to) ? data.to[0] : data.to;
+    if (messageId) {
+      if (type === "email.delivered") {
+        await recordTouchDelivery({ providerMessageId: messageId, signal: "delivered" });
+      } else if (type === "email.bounced") {
+        await handleBounce({
+          providerMessageId: messageId,
+          channel: "email",
+          address: typeof to === "string" ? to : null,
+          reason: "hard_bounce",
+          source: "resend_webhook",
+          detail: data.bounce?.message?.slice(0, 500)
+        });
+      } else if (type === "email.complained") {
+        await recordTouchDelivery({ providerMessageId: messageId, signal: "unsubscribed" });
+        await handleBounce({
+          providerMessageId: messageId,
+          channel: "email",
+          address: typeof to === "string" ? to : null,
+          reason: "unsubscribed",
+          source: "resend_webhook",
+          detail: "spam complaint"
+        });
+      }
+    }
+    res.status(200).json({ received: true });
+  }
+);
+router32.post(
+  "/public/sms/status",
+  rateLimit({ windowMs: 6e4, max: 240, key: "sms-status" }),
+  async (req, res) => {
+    if (!twilioSignatureValid(req)) {
+      res.status(403).json({ error: "invalid signature" });
+      return;
+    }
+    const sid = typeof req.body?.MessageSid === "string" ? req.body.MessageSid : "";
+    const status = typeof req.body?.MessageStatus === "string" ? req.body.MessageStatus : "";
+    const errorCode = typeof req.body?.ErrorCode === "string" || typeof req.body?.ErrorCode === "number" ? String(req.body.ErrorCode) : void 0;
+    const to = typeof req.body?.To === "string" ? req.body.To : null;
+    if (sid) {
+      if (status === "delivered") {
+        await recordTouchDelivery({ providerMessageId: sid, signal: "delivered" });
+      } else if (status === "undelivered" || status === "failed") {
+        if (isPermanentTwilioError(errorCode)) {
+          await handleBounce({
+            providerMessageId: sid,
+            channel: "sms",
+            address: to,
+            reason: errorCode === "21610" ? "stop_keyword" : "invalid",
+            source: "twilio_status",
+            detail: `status=${status} errorCode=${errorCode}`
+          });
+        } else {
+          await recordTouchDelivery({
+            providerMessageId: sid,
+            signal: "bounced",
+            detail: `status=${status} errorCode=${errorCode ?? "none"}`
+          });
+        }
+      }
+    }
+    res.status(204).end();
+  }
+);
+var delivery_status_default = router32;
+
+// src/routes/v1/index.ts
+var router33 = (0, import_express33.Router)();
+router33.use(me_default);
+router33.use(contacts_default);
+router33.use(leads_default);
+router33.use(estimates_default);
+router33.use(projects_default);
+router33.use(tasks_default);
+router33.use(appointments_default);
+router33.use(dashboard_default);
+router33.use(reports_default);
+router33.use(assistant_default);
+router33.use(settings_default);
+router33.use(api_keys_default);
+router33.use(installation_default);
+router33.use(knowledge_default);
+router33.use(forms_default);
+router33.use(templates_default);
+router33.use(automations_default);
+router33.use(playbooks_default);
+router33.use(reactivation_default);
+router33.use(capture_default);
+router33.use(webhooks_default);
+router33.use(tags_default);
+router33.use(public_default);
+router33.use(unsubscribe_default);
+router33.use(delivery_status_default);
+router33.use(storage_default);
+router33.use(portal_default);
+router33.use(google_reviews_default);
+router33.use(orgs_default);
+router33.use(onboarding_default);
+var v1_default = router33;
 
 // src/routes/index.ts
-var router33 = (0, import_express33.Router)();
-router33.use(health_default);
-router33.use(auth_default);
-router33.use("/v1", v1_default);
-var routes_default = router33;
+var router34 = (0, import_express34.Router)();
+router34.use(health_default);
+router34.use(auth_default);
+router34.use("/v1", v1_default);
+var routes_default = router34;
 
 // src/app.ts
 init_logger2();
@@ -72012,7 +72350,7 @@ async function authMiddleware(req, res, next) {
 }
 
 // src/app.ts
-var app = (0, import_express34.default)();
+var app = (0, import_express35.default)();
 app.set("trust proxy", 1);
 app.use(
   (0, import_pino_http.default)({
@@ -72037,11 +72375,17 @@ app.use((0, import_cors.default)({ origin: true, credentials: true }));
 app.use((0, import_cookie_parser.default)());
 app.use(
   "/api/v1/public/concierge/transcriptions",
-  import_express34.default.json({ limit: "8mb" })
+  import_express35.default.json({ limit: "8mb" })
 );
-app.use("/api/v1/lead-imports", import_express34.default.json({ limit: "8mb" }));
-app.use(import_express34.default.json());
-app.use(import_express34.default.urlencoded({ extended: true }));
+app.use("/api/v1/lead-imports", import_express35.default.json({ limit: "8mb" }));
+app.use(
+  import_express35.default.json({
+    verify: (req, _res, buf2) => {
+      req.rawBody = buf2;
+    }
+  })
+);
+app.use(import_express35.default.urlencoded({ extended: true }));
 app.use(authMiddleware);
 app.use("/api", routes_default);
 var app_default = app;
