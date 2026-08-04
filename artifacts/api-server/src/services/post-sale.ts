@@ -34,7 +34,10 @@ interface PostSaleSeed {
 const DAY = 60 * 24;
 
 function postSaleSeeds(legacy: boolean): PostSaleSeed[] {
-  const project = legacy ? "roof" : "project";
+  // "workLabel" gives natural phrasing in sentences ("their roofing work" /
+  // "their project") without the redundant "project work" you'd get from a
+  // bare "project" variable inserted before "work".
+  const workLabel = legacy ? "roofing work" : "project";
   return [
     {
       seedKey: REVIEW_PLAYBOOK_SEED_KEY,
@@ -46,7 +49,7 @@ function postSaleSeeds(legacy: boolean): PostSaleSeed[] {
           delayMinutes: 2 * DAY,
           subject: "How did we do?",
           linkKind: "review",
-          prompt: `The customer's ${project} work wrapped up a couple of days ago. Warmly thank them, ask how everything turned out, and invite them to leave a quick review using the link below — it genuinely helps a small business. One short paragraph, no pressure.`,
+          prompt: `The customer's ${workLabel} wrapped up a couple of days ago. Warmly thank them, ask how everything turned out, and invite them to leave a quick review using the link below — it genuinely helps a small business. One short paragraph, no pressure.`,
         },
         {
           channel: "email",
@@ -54,7 +57,7 @@ function postSaleSeeds(legacy: boolean): PostSaleSeed[] {
           subject: "A quick favor?",
           linkKind: "review",
           prompt:
-            "Gentle one-time reminder about the review request sent last week. Keep it to two sentences, acknowledge they're busy, and note the link below takes under a minute. Never guilt-trip.",
+            "Gentle one-time reminder about the review request sent last week. Keep it to two sentences, acknowledge they're busy, and note the link below only takes a moment. Never guilt-trip.",
         },
       ],
     },
@@ -68,7 +71,7 @@ function postSaleSeeds(legacy: boolean): PostSaleSeed[] {
           delayMinutes: 14 * DAY,
           subject: "Know someone we can help?",
           linkKind: "referral",
-          prompt: `Two weeks after their ${project} was finished. Thank them again and ask if a friend or neighbor could use the same help — they can pass along a name with the link below. Warm and brief.`,
+          prompt: `Two weeks after their ${workLabel} wrapped up. Thank them again and ask if a friend or neighbor could use the same help — they can submit a referral with the link below. Warm and brief.`,
         },
       ],
     },

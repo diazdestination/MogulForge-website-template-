@@ -616,7 +616,7 @@ export async function executePlaybookStep(
     linkSuffix =
       step.linkKind === "review"
         ? `\n\nLeave us a review: ${engagementLinkUrl(link)}`
-        : `\n\nKnow someone we can help? Pass along their name: ${engagementLinkUrl(link)}`;
+        : `\n\nRefer a friend or neighbor here: ${engagementLinkUrl(link)}`;
   }
 
   if (gateSkipReason) {

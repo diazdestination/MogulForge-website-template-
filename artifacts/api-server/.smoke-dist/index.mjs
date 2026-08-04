@@ -47106,7 +47106,7 @@ async function executePlaybookStep(organizationId, params) {
 
 Leave us a review: ${engagementLinkUrl(link)}` : `
 
-Know someone we can help? Pass along their name: ${engagementLinkUrl(link)}`;
+Refer a friend or neighbor here: ${engagementLinkUrl(link)}`;
   }
   if (gateSkipReason) {
     skipDetail = `blocked: ${gateSkipReason}`;
@@ -47477,7 +47477,7 @@ var init_playbooks2 = __esm({
 
 // src/services/post-sale.ts
 function postSaleSeeds(legacy) {
-  const project = legacy ? "roof" : "project";
+  const workLabel = legacy ? "roofing work" : "project";
   return [
     {
       seedKey: REVIEW_PLAYBOOK_SEED_KEY,
@@ -47489,14 +47489,14 @@ function postSaleSeeds(legacy) {
           delayMinutes: 2 * DAY,
           subject: "How did we do?",
           linkKind: "review",
-          prompt: `The customer's ${project} work wrapped up a couple of days ago. Warmly thank them, ask how everything turned out, and invite them to leave a quick review using the link below \u2014 it genuinely helps a small business. One short paragraph, no pressure.`
+          prompt: `The customer's ${workLabel} wrapped up a couple of days ago. Warmly thank them, ask how everything turned out, and invite them to leave a quick review using the link below \u2014 it genuinely helps a small business. One short paragraph, no pressure.`
         },
         {
           channel: "email",
           delayMinutes: 7 * DAY,
           subject: "A quick favor?",
           linkKind: "review",
-          prompt: "Gentle one-time reminder about the review request sent last week. Keep it to two sentences, acknowledge they're busy, and note the link below takes under a minute. Never guilt-trip."
+          prompt: "Gentle one-time reminder about the review request sent last week. Keep it to two sentences, acknowledge they're busy, and note the link below only takes a moment. Never guilt-trip."
         }
       ]
     },
@@ -47510,7 +47510,7 @@ function postSaleSeeds(legacy) {
           delayMinutes: 14 * DAY,
           subject: "Know someone we can help?",
           linkKind: "referral",
-          prompt: `Two weeks after their ${project} was finished. Thank them again and ask if a friend or neighbor could use the same help \u2014 they can pass along a name with the link below. Warm and brief.`
+          prompt: `Two weeks after their ${workLabel} wrapped up. Thank them again and ask if a friend or neighbor could use the same help \u2014 they can submit a referral with the link below. Warm and brief.`
         }
       ]
     },
