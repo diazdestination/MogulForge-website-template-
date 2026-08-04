@@ -5,6 +5,7 @@ import {
   CreateLeadActivityBody,
   CreateLeadBody,
   CreateSavedFilterBody,
+  CorrectWonRevenueBody,
   MergeLeadBody,
   UpdateLeadBody,
   RequestPublicUploadUrlBody,
@@ -24,6 +25,7 @@ import { recordAudit } from "../../services/audit";
 import { emitAutomationEvent } from "../../services/automation";
 import { listLeadConversations } from "../../services/concierge";
 import * as crm from "../../services/crm";
+import { correctWonRevenue } from "../../services/post-sale";
 import {
   getNextBestAction,
   listTodayActions,
@@ -556,6 +558,45 @@ router.post(
       metadata: { to: contact.email, subject, provider: sent.provider },
     });
     res.status(201).json(activity);
+  },
+);
+
+// ---------- Won-revenue correction (admin only) ----------
+
+router.patch(
+  "/leads/:id/won-revenue",
+  requireMember("settings.manage"),
+  async (req: Request, res: Response): Promise<void> => {
+    const parsed = CorrectWonRevenueBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid body: wonRevenueCents must be a non-negative integer or null" });
+      return;
+    }
+    const result = await correctWonRevenue(
+      req.member!.organizationId,
+      String(req.params.id),
+      parsed.data.wonRevenueCents,
+    );
+    if (!result.ok) {
+      if (result.error === "not_found") {
+        res.status(404).json({ error: "Lead not found" });
+      } else {
+        res.status(409).json({ error: "Lead has not been won yet; there is no revenue record to correct" });
+      }
+      return;
+    }
+    await recordAudit({
+      organizationId: req.member!.organizationId,
+      actorUserId: req.member!.user.id,
+      action: "lead.won_revenue_corrected",
+      entityType: "lead",
+      entityId: String(req.params.id),
+      metadata: {
+        previousCents: result.previousCents,
+        newCents: parsed.data.wonRevenueCents,
+      },
+    });
+    res.status(204).end();
   },
 );
 

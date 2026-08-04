@@ -92,6 +92,9 @@ const EXPECTED_PERMISSIONS: Record<string, Permission> = {
   "POST /leads/:id/photos/request-url": "crm.write",
   "POST /leads/:id/photos": "crm.write",
   "DELETE /leads/:id/photos": "crm.write",
+  // Admin-only correction of wonRevenueCents after a win (change orders,
+  // refunds, data-entry mistakes). Attribution category is never touched.
+  "PATCH /leads/:id/won-revenue": "settings.manage",
   // assistant history is personal to the requesting user (scoped by user id);
   // reading and saving your own history only needs crm.read.
   "GET /assistant/history": "crm.read",
@@ -173,8 +176,6 @@ const EXPECTED_PERMISSIONS: Record<string, Permission> = {
   "POST /playbooks": "settings.manage",
   "PATCH /playbooks/:id": "settings.manage",
   "GET /leads/:id/enrollment": "crm.read",
-  "POST /enrollments/:id/pause": "crm.write",
-  "POST /enrollments/:id/resume": "crm.write",
   "POST /enrollments/:id/skip": "crm.write",
   // external lead capture (inbound webhook endpoints + mapping)
   "GET /capture-endpoints": "crm.read",

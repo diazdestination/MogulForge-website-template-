@@ -47626,6 +47626,23 @@ async function classifyWonLead(organizationId, leadId) {
     console.error("[post-sale] won classification failed:", err);
   }
 }
+async function correctWonRevenue(organizationId, leadId, newRevenueCents) {
+  const [lead] = await db.select().from(leadsTable).where(
+    and(
+      eq(leadsTable.id, leadId),
+      eq(leadsTable.organizationId, organizationId)
+    )
+  );
+  if (!lead) return { ok: false, error: "not_found" };
+  if (!lead.wonAt) return { ok: false, error: "not_won" };
+  await db.update(leadsTable).set({ wonRevenueCents: newRevenueCents }).where(
+    and(
+      eq(leadsTable.id, leadId),
+      eq(leadsTable.organizationId, organizationId)
+    )
+  );
+  return { ok: true, previousCents: lead.wonRevenueCents ?? null };
+}
 var REVIEW_PLAYBOOK_SEED_KEY, REFERRAL_PLAYBOOK_SEED_KEY, MAINTENANCE_PLAYBOOK_SEED_KEY, DAY, PLATFORM_CAPTURE_METHODS;
 var init_post_sale = __esm({
   "src/services/post-sale.ts"() {
@@ -60371,6 +60388,10 @@ var CreateOnboardingTestLeadResponse = zod.object({
 var DeleteOnboardingTestLeadResponse = zod.object({
   "removed": zod.number()
 });
+var CorrectWonRevenueBody = zod.object({
+  /** New revenue amount in cents. Pass null to clear the figure. */
+  "wonRevenueCents": zod.int().min(0).nullable()
+});
 
 // src/routes/auth.ts
 init_src();
@@ -67362,6 +67383,7 @@ init_attribution();
 init_audit2();
 init_automation();
 init_concierge();
+init_post_sale();
 init_portal_message_email();
 init_providers();
 var router15 = (0, import_express15.Router)();
@@ -67828,6 +67850,42 @@ router15.post(
       metadata: { to: contact.email, subject, provider: sent.provider }
     });
     res.status(201).json(activity);
+  }
+);
+router15.patch(
+  "/leads/:id/won-revenue",
+  requireMember("settings.manage"),
+  async (req, res) => {
+    const parsed = CorrectWonRevenueBody.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Invalid body: wonRevenueCents must be a non-negative integer or null" });
+      return;
+    }
+    const result = await correctWonRevenue(
+      req.member.organizationId,
+      String(req.params.id),
+      parsed.data.wonRevenueCents
+    );
+    if (!result.ok) {
+      if (result.error === "not_found") {
+        res.status(404).json({ error: "Lead not found" });
+      } else {
+        res.status(409).json({ error: "Lead has not been won yet; there is no revenue record to correct" });
+      }
+      return;
+    }
+    await recordAudit({
+      organizationId: req.member.organizationId,
+      actorUserId: req.member.user.id,
+      action: "lead.won_revenue_corrected",
+      entityType: "lead",
+      entityId: String(req.params.id),
+      metadata: {
+        previousCents: result.previousCents,
+        newCents: parsed.data.wonRevenueCents
+      }
+    });
+    res.status(204).end();
   }
 );
 router15.post(
@@ -71851,6 +71909,7 @@ var ONBOARDING_STEPS = [
   "snippet",
   "verify",
   "test-lead",
+  "invite-team",
   "launch"
 ];
 var STEP_SET = new Set(ONBOARDING_STEPS);

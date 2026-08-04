@@ -28,6 +28,7 @@ import {
 } from "./engagement-links";
 import {
   classifyWonLead,
+  correctWonRevenue,
   ensurePostSalePlaybooks,
   handlePostSaleTransition,
   REVIEW_PLAYBOOK_SEED_KEY,
@@ -434,6 +435,68 @@ describe("engagement links", () => {
         ),
       );
     expect(contacts).toHaveLength(1);
+  });
+});
+
+describe("correctWonRevenue", () => {
+  const wonRow = async (leadId: string) => {
+    const [row] = await db
+      .select()
+      .from(leadsTable)
+      .where(eq(leadsTable.id, leadId));
+    return row;
+  };
+
+  it("returns not_found for an unknown lead", async () => {
+    const result = await correctWonRevenue(
+      org.id,
+      "00000000-0000-0000-0000-000000000000",
+      100_000,
+    );
+    expect(result).toEqual({ ok: false, error: "not_found" });
+  });
+
+  it("returns not_won for a lead that has never been classified", async () => {
+    const { lead } = await makeLead();
+    const result = await correctWonRevenue(org.id, lead.id, 100_000);
+    expect(result).toEqual({ ok: false, error: "not_won" });
+  });
+
+  it("corrects the revenue amount, leaves attribution untouched, returns previousCents", async () => {
+    const { lead } = await makeLead(org.id, { estimatedValueCents: 400_000 });
+    await classifyWonLead(org.id, lead.id);
+
+    const result = await correctWonRevenue(org.id, lead.id, 600_000);
+    expect(result).toEqual({ ok: true, previousCents: 400_000 });
+
+    const row = await wonRow(lead.id);
+    expect(row.wonRevenueCents).toBe(600_000);
+    expect(row.wonAttribution).toBe("estimated"); // untouched
+    expect(row.wonAt).not.toBeNull();            // untouched
+  });
+
+  it("can clear revenue to null", async () => {
+    const { lead } = await makeLead(org.id, { estimatedValueCents: 100_000 });
+    await classifyWonLead(org.id, lead.id);
+
+    const result = await correctWonRevenue(org.id, lead.id, null);
+    expect(result).toMatchObject({ ok: true, previousCents: 100_000 });
+
+    const row = await wonRow(lead.id);
+    expect(row.wonRevenueCents).toBeNull();
+    expect(row.wonAttribution).toBe("estimated"); // attribution still present
+  });
+
+  it("can be applied multiple times (change orders)", async () => {
+    const { lead } = await makeLead(org.id, { estimatedValueCents: 200_000 });
+    await classifyWonLead(org.id, lead.id);
+
+    await correctWonRevenue(org.id, lead.id, 250_000);
+    const r2 = await correctWonRevenue(org.id, lead.id, 275_000);
+    expect(r2).toEqual({ ok: true, previousCents: 250_000 });
+
+    const row = await wonRow(lead.id);
+    expect(row.wonRevenueCents).toBe(275_000);
   });
 });
 

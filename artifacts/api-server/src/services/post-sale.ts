@@ -265,3 +265,46 @@ export async function classifyWonLead(
     console.error("[post-sale] won classification failed:", err);
   }
 }
+
+/**
+ * Correct the wonRevenueCents on an already-won lead (e.g. after a change
+ * order, refund, or data-entry mistake). Attribution category is NEVER
+ * touched — only the amount. Returns the previous value so the caller can
+ * write an audit record.
+ *
+ * Returns { ok: false, error: "not_found" } when the lead doesn't belong to
+ * the org, and { ok: false, error: "not_won" } when the lead hasn't been won
+ * yet (there is no revenue record to correct).
+ */
+export async function correctWonRevenue(
+  organizationId: string,
+  leadId: string,
+  newRevenueCents: number | null,
+): Promise<
+  | { ok: true; previousCents: number | null }
+  | { ok: false; error: "not_found" | "not_won" }
+> {
+  const [lead] = await db
+    .select()
+    .from(leadsTable)
+    .where(
+      and(
+        eq(leadsTable.id, leadId),
+        eq(leadsTable.organizationId, organizationId),
+      ),
+    );
+  if (!lead) return { ok: false, error: "not_found" };
+  if (!lead.wonAt) return { ok: false, error: "not_won" };
+
+  await db
+    .update(leadsTable)
+    .set({ wonRevenueCents: newRevenueCents })
+    .where(
+      and(
+        eq(leadsTable.id, leadId),
+        eq(leadsTable.organizationId, organizationId),
+      ),
+    );
+
+  return { ok: true, previousCents: lead.wonRevenueCents ?? null };
+}

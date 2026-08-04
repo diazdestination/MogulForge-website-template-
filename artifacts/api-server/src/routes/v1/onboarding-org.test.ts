@@ -274,6 +274,60 @@ describe("onboarding wizard state", () => {
     expect(body.state.completedAt).toBeTruthy();
   });
 
+  it("invite-team step is included in the canonical step list", async () => {
+    const res = await authed(sid)("/api/v1/onboarding");
+    const body = (await res.json()) as any;
+    expect(body.steps).toContain("invite-team");
+    // Must appear before "launch"
+    const inviteIdx = body.steps.indexOf("invite-team");
+    const launchIdx = body.steps.indexOf("launch");
+    expect(inviteIdx).toBeGreaterThan(-1);
+    expect(inviteIdx).toBeLessThan(launchIdx);
+  });
+
+  it("invite-team step can be marked complete via PATCH and is persisted", async () => {
+    const before = (await (await authed(sid)("/api/v1/onboarding")).json()) as any;
+    const wasComplete = before.state.completedSteps.includes("invite-team");
+
+    const res = await authed(sid)("/api/v1/onboarding", {
+      method: "PATCH",
+      body: JSON.stringify({ completeSteps: ["invite-team"] }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.state.completedSteps).toContain("invite-team");
+
+    // Persists across a fresh read
+    const reread = (await (await authed(sid)("/api/v1/onboarding")).json()) as any;
+    expect(reread.state.completedSteps).toContain("invite-team");
+
+    // Clean up: remove it if it wasn't already there
+    if (!wasComplete) {
+      // Steps only accumulate, so we can't un-complete — just verify the
+      // forward direction works; the step stays in the list.
+    }
+  });
+
+  it("inviting a teammate lands them in the new org, not the default org", async () => {
+    const inviteEmail = `invite-wizard-${Date.now()}@example.com`;
+    const res = await authed(sid)("/api/v1/users/invite", {
+      method: "POST",
+      body: JSON.stringify({ email: inviteEmail, role: "sales_rep" }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as any;
+    expect(body.id.startsWith("invite:")).toBe(true);
+    expect(body.email).toBe(inviteEmail);
+
+    // Confirm they landed in the wizard org, not the default org
+    const [invited] = await db
+      .select()
+      .from(usersTable)
+      .where(eq(usersTable.id, body.id));
+    expect(invited.organizationId).toBe(orgId);
+    createdUserIds.push(invited.id);
+  });
+
   it("guided test lead: creates marked sandbox records with no reachable channels, then cleans up fully", async () => {
     const created = await authed(sid)("/api/v1/onboarding/test-lead", { method: "POST" });
     expect(created.status).toBe(201);

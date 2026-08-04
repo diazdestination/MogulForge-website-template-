@@ -4327,4 +4327,13 @@ export const DeleteOnboardingTestLeadResponse = zod.object({
   "removed": zod.number()
 })
 
+/**
+ * @summary Correct the won revenue on a lead after a win (admin only).
+ * Attribution category is intentionally left untouched.
+ */
+export const CorrectWonRevenueBody = zod.object({
+  /** New revenue amount in cents. Pass null to clear the figure. */
+  "wonRevenueCents": zod.int().min(0).nullable(),
+})
+
 

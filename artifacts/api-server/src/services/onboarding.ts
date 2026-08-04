@@ -26,6 +26,7 @@ export const ONBOARDING_STEPS = [
   "snippet",
   "verify",
   "test-lead",
+  "invite-team",
   "launch",
 ] as const;
 
