@@ -64,14 +64,26 @@ export { isLegacyDefaultOrg, clearLegacyOrgCache } from "../lib/orgFlavor";
  * flow. New users are deliberately NOT auto-attached to the default org —
  * strangers must never land inside another company's CRM.
  */
-export async function ensureMembership(userId: string) {
+export async function ensureMembership(
+  userId: string,
+  /** Test-only seam: supply a fresh empty org id to exercise the bootstrap branch
+   *  without touching the real default org (which always has members in dev/CI). */
+  _testOrgOverride?: { id: string },
+) {
   const [user] = await db
     .select()
     .from(usersTable)
     .where(eq(usersTable.id, userId));
   if (!user || user.organizationId) return user;
 
-  const org = await getDefaultOrganization();
+  const org = _testOrgOverride
+    ? (
+        await db
+          .select()
+          .from(organizationsTable)
+          .where(eq(organizationsTable.id, _testOrgOverride.id))
+      )[0]
+    : await getDefaultOrganization();
   // Transaction + row lock on the org serializes concurrent first logins so
   // only one user can ever be promoted to owner.
   return db.transaction(async (tx) => {

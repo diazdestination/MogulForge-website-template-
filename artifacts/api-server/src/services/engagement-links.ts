@@ -67,11 +67,11 @@ export async function getOrCreateEngagementLink(
   }
 }
 
-/** Absolute URL a customer clicks (review redirect / referral form API). */
+/** Absolute URL a customer clicks (review redirect / referral hosted page). */
 export function engagementLinkUrl(link: EngagementLink): string {
   return link.kind === "review"
     ? `${publicBaseUrl()}/api/v1/public/el/${link.token}`
-    : `${publicBaseUrl()}/api/v1/public/referrals/${link.token}`;
+    : `${publicBaseUrl()}/api/v1/public/referral/${link.token}`;
 }
 
 export async function findEngagementLink(

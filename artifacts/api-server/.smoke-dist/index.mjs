@@ -46427,7 +46427,7 @@ async function getOrCreateEngagementLink(organizationId, contactId, kind, leadId
   }
 }
 function engagementLinkUrl(link) {
-  return link.kind === "review" ? `${publicBaseUrl()}/api/v1/public/el/${link.token}` : `${publicBaseUrl()}/api/v1/public/referrals/${link.token}`;
+  return link.kind === "review" ? `${publicBaseUrl()}/api/v1/public/el/${link.token}` : `${publicBaseUrl()}/api/v1/public/referral/${link.token}`;
 }
 async function findEngagementLink(token) {
   const [row] = await db.select().from(engagementLinksTable).where(eq(engagementLinksTable.token, token));
@@ -62060,10 +62060,10 @@ async function getDefaultOrganization() {
   }
   return org;
 }
-async function ensureMembership(userId) {
+async function ensureMembership(userId, _testOrgOverride) {
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
   if (!user || user.organizationId) return user;
-  const org = await getDefaultOrganization();
+  const org = _testOrgOverride ? (await db.select().from(organizationsTable).where(eq(organizationsTable.id, _testOrgOverride.id)))[0] : await getDefaultOrganization();
   return db.transaction(async (tx) => {
     await tx.execute(
       sql`select id from ${organizationsTable} where ${organizationsTable.id} = ${org.id} for update`
@@ -69911,6 +69911,198 @@ router17.get(
     }
     const destination = await recordReviewClick(link);
     res.redirect(302, destination);
+  }
+);
+router17.get(
+  "/public/referral/:token",
+  rateLimit({ windowMs: 6e4, max: 30, key: "referral-page" }),
+  (req, res) => {
+    const token = String(req.params.token);
+    if (!/^[A-Za-z0-9_-]{10,40}$/.test(token)) {
+      res.status(400).send("Invalid link");
+      return;
+    }
+    const apiBase = "/api/v1";
+    res.status(200).setHeader("Content-Type", "text/html; charset=utf-8").setHeader("Cache-Control", "no-store").send(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Refer a Friend</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:#f3f4f6;min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;font-family:system-ui,-apple-system,sans-serif;color:#111827}
+.card{background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.08),0 4px 16px rgba(0,0,0,.06);padding:40px 32px;width:100%;max-width:520px}
+h1{margin:0 0 4px;font-size:1.375rem;font-weight:700}
+.subtitle{margin:0 0 28px;color:#6b7280;font-size:.9375rem}
+label{display:block;margin-bottom:16px}
+.label-text{display:block;font-size:.875rem;font-weight:500;margin-bottom:6px}
+input,textarea{width:100%;padding:10px 12px;border:1.5px solid #d1d5db;border-radius:8px;font-size:.9375rem;font-family:inherit;line-height:1.4;transition:border-color .15s}
+input:focus,textarea:focus{outline:none;border-color:#6366f1}
+textarea{resize:vertical;min-height:80px}
+.hint{font-size:.8125rem;color:#6b7280;margin-top:4px}
+.btn{display:block;width:100%;padding:12px;background:#4f46e5;color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer;margin-top:8px;transition:background .15s}
+.btn:hover{background:#4338ca}
+.btn:disabled{background:#a5b4fc;cursor:not-allowed}
+.error-msg{color:#dc2626;font-size:.875rem;margin-top:6px}
+.field-error{border-color:#dc2626!important}
+#status{margin-top:16px;font-size:.875rem}
+.success-card{text-align:center;padding:48px 32px}
+.success-icon{font-size:3rem;margin-bottom:12px}
+.success-card h1{font-size:1.5rem;margin-bottom:8px}
+.success-card p{color:#6b7280;margin:0}
+.not-found{text-align:center;padding:48px 32px}
+.not-found h1{color:#374151}
+.not-found p{color:#6b7280;margin:4px 0 0}
+</style>
+</head>
+<body>
+<div class="card" id="app">
+  <p style="color:#6b7280;text-align:center">Loading\u2026</p>
+</div>
+<script>
+(function(){
+  var TOKEN = ${JSON.stringify(token)};
+  var API = ${JSON.stringify(apiBase)};
+  var app = document.getElementById('app');
+
+  function showNotFound(){
+    app.innerHTML = '<div class="not-found"><div style="font-size:2.5rem">\u{1F517}</div><h1>Link not found</h1><p>This referral link may have expired or is no longer valid.</p></div>';
+  }
+
+  function showSuccess(bizName){
+    app.innerHTML = '<div class="success-card"><div class="success-icon">\u{1F389}</div><h1>Thank you!</h1><p>Your referral has been sent to '+escHtml(bizName)+'. We appreciate you spreading the word!</p></div>';
+  }
+
+  function escHtml(s){
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function renderForm(bizName){
+    app.innerHTML =
+      '<h1>'+escHtml(bizName)+'</h1>'+
+      '<p class="subtitle">Know someone who could use our help? Pass along their name and we'll take it from there.</p>'+
+      '<form id="rf" novalidate>'+
+        '<label><span class="label-text">Their full name <span style="color:#dc2626">*</span></span>'+
+          '<input id="f-name" type="text" autocomplete="name" placeholder="Jane Smith">'+
+          '<span class="error-msg" id="e-name" hidden></span>'+
+        '</label>'+
+        '<label><span class="label-text">Email address</span>'+
+          '<input id="f-email" type="email" autocomplete="email" placeholder="jane@example.com">'+
+          '<span class="error-msg" id="e-email" hidden></span>'+
+        '</label>'+
+        '<label><span class="label-text">Phone number</span>'+
+          '<input id="f-phone" type="tel" autocomplete="tel" placeholder="(555) 123-4567">'+
+          '<span class="hint">At least one of email or phone is required.</span>'+
+          '<span class="error-msg" id="e-contact" hidden></span>'+
+        '</label>'+
+        '<label><span class="label-text">Anything we should know?</span>'+
+          '<textarea id="f-notes" placeholder="Optional notes about their roof or situation\u2026"></textarea>'+
+        '</label>'+
+        '<button type="submit" class="btn" id="submit-btn">Send referral</button>'+
+        '<div id="status"></div>'+
+      '</form>';
+
+    document.getElementById('rf').addEventListener('submit', function(e){
+      e.preventDefault();
+      submitForm(bizName);
+    });
+  }
+
+  function submitForm(bizName){
+    var name  = document.getElementById('f-name').value.trim();
+    var email = document.getElementById('f-email').value.trim();
+    var phone = document.getElementById('f-phone').value.trim();
+    var notes = document.getElementById('f-notes').value.trim();
+
+    // Clear previous errors
+    ['name','email','contact'].forEach(function(k){
+      var el = document.getElementById('e-'+k);
+      el.hidden = true; el.textContent = '';
+    });
+    document.getElementById('f-name').classList.remove('field-error');
+    document.getElementById('f-email').classList.remove('field-error');
+    document.getElementById('f-phone').classList.remove('field-error');
+
+    var valid = true;
+    if(!name){
+      showFieldError('name','Full name is required.');
+      valid = false;
+    }
+    if(!email && !phone){
+      showFieldError('contact','Please provide an email address or phone number.');
+      document.getElementById('f-email').classList.add('field-error');
+      document.getElementById('f-phone').classList.add('field-error');
+      valid = false;
+    }
+    if(!valid) return;
+
+    var btn = document.getElementById('submit-btn');
+    btn.disabled = true;
+    btn.textContent = 'Sending\u2026';
+    document.getElementById('status').textContent = '';
+
+    var body = {name:name};
+    if(email) body.email = email;
+    if(phone) body.phone = phone;
+    if(notes) body.notes = notes;
+
+    fetch(API+'/public/referrals/'+TOKEN, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    })
+    .then(function(r){
+      if(r.status===404){ showNotFound(); return null; }
+      return r.json().then(function(d){ return {status:r.status,data:d}; });
+    })
+    .then(function(res){
+      if(!res) return;
+      if(res.status===201 && res.data && res.data.ok){
+        showSuccess(bizName);
+      } else {
+        var msg = (res.data && res.data.error) || 'Something went wrong. Please try again.';
+        document.getElementById('status').textContent = msg;
+        document.getElementById('status').style.color = '#dc2626';
+        btn.disabled = false;
+        btn.textContent = 'Send referral';
+      }
+    })
+    .catch(function(){
+      document.getElementById('status').textContent = 'Network error \u2014 please check your connection and try again.';
+      document.getElementById('status').style.color = '#dc2626';
+      btn.disabled = false;
+      btn.textContent = 'Send referral';
+    });
+  }
+
+  function showFieldError(key, msg){
+    var el = document.getElementById('e-'+key);
+    el.textContent = msg;
+    el.hidden = false;
+    var input = document.getElementById('f-'+key);
+    if(input) input.classList.add('field-error');
+  }
+
+  // Bootstrap: fetch business info
+  fetch(API+'/public/referrals/'+TOKEN)
+    .then(function(r){
+      if(r.status===404){ showNotFound(); return null; }
+      if(!r.ok){ showNotFound(); return null; }
+      return r.json();
+    })
+    .then(function(d){
+      if(!d) return;
+      renderForm(d.businessName || 'Us');
+    })
+    .catch(function(){
+      app.innerHTML = '<p style="text-align:center;color:#6b7280">Unable to load page. Please try again later.</p>';
+    });
+})();
+</script>
+</body>
+</html>`);
   }
 );
 router17.get(
