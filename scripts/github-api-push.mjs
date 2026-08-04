@@ -42,19 +42,24 @@
 import { ReplitConnectors } from "@replit/connectors-sdk";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { join, relative } from "node:path";
 
 // ---------------------------------------------------------------------------
-// Args
+// Args — parsed at module level so helper functions can close over them.
+// The usage-error check is gated on direct execution so tests can import
+// gitBlobSha() without triggering process.exit().
 // ---------------------------------------------------------------------------
 const [owner, repo, localDir, ...msgParts] = process.argv.slice(2);
 const commitMessage = msgParts.join(" ");
 
-if (!owner || !repo || !localDir || !commitMessage) {
-  console.error(
-    "Usage: node github-api-push.mjs <owner> <repo> <local-dir> <commit-message>",
-  );
-  process.exit(1);
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  if (!owner || !repo || !localDir || !commitMessage) {
+    console.error(
+      "Usage: node github-api-push.mjs <owner> <repo> <local-dir> <commit-message>",
+    );
+    process.exit(1);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +171,7 @@ async function ghApi(method, path, body, retries = 5, allowMissing = false) {
 // ---------------------------------------------------------------------------
 // Git blob SHA — same formula GitHub uses to store a blob
 // ---------------------------------------------------------------------------
-function gitBlobSha(content /* Buffer */) {
+export function gitBlobSha(content /* Buffer */) {
   const hash = createHash("sha1");
   hash.update(`blob ${content.length}\0`);
   hash.update(content);
@@ -290,9 +295,9 @@ async function ensureRepo() {
 }
 
 // ---------------------------------------------------------------------------
-// Main
+// Main — only runs when the file is executed directly, not when imported by tests
 // ---------------------------------------------------------------------------
-(async () => {
+if (process.argv[1] === fileURLToPath(import.meta.url)) (async () => {
   const files = collectFiles(localDir);
   console.log(
     `ℹ️   ${files.length} files → github.com/${owner}/${repo} (main) …`,

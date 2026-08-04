@@ -7,11 +7,13 @@
     "hello": "tsx ./src/hello.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "seed": "tsx ./src/seed.ts",
-    "smoke": "bash ./post-merge-sync.test.sh"
+    "smoke": "bash ./post-merge-sync.test.sh",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@types/node": "catalog:",
-    "tsx": "catalog:"
+    "tsx": "catalog:",
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "@workspace/db": "workspace:*",
