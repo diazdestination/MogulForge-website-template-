@@ -89,6 +89,37 @@ describe("bootstrap branch: first sign-in on an empty platform", () => {
   });
 });
 
+describe("concurrent first sign-in race", () => {
+  it("exactly one of two simultaneous sign-ins becomes owner; the other stays org-less", async () => {
+    const emptyOrg = await makeEmptyOrg();
+    const userA = await makeUser();
+    const userB = await makeUser();
+
+    // Fire both ensureMembership calls at the same time so they race
+    // through the zero-member check before either commits.
+    const [resultA, resultB] = await Promise.all([
+      ensureMembership(userA.id, { id: emptyOrg.id }),
+      ensureMembership(userB.id, { id: emptyOrg.id }),
+    ]);
+
+    const owners = [resultA, resultB].filter(
+      (u) => u?.organizationId === emptyOrg.id && u?.role === "owner" && u?.isPlatformAdmin,
+    );
+    const orgLess = [resultA, resultB].filter((u) => !u?.organizationId);
+
+    // The FOR UPDATE advisory lock must guarantee exactly one winner.
+    expect(owners).toHaveLength(1);
+    expect(orgLess).toHaveLength(1);
+
+    // Verify the DB reflects the same single winner.
+    const [{ ownerCount }] = await db
+      .select({ ownerCount: count() })
+      .from(usersTable)
+      .where(eq(usersTable.organizationId, emptyOrg.id));
+    expect(Number(ownerCount)).toBe(1);
+  });
+});
+
 describe("invited-user path bypasses bootstrap logic", () => {
   it("a user pre-provisioned with an org (invite: adoption) skips the bootstrap check", async () => {
     const emptyOrg = await makeEmptyOrg();
