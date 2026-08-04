@@ -17,6 +17,13 @@ export const contactsTable = pgTable(
     preferredContactMethod: text("preferred_contact_method"),
     /** Hard do-not-contact flag: blocks ALL automated outreach on every channel. */
     doNotContact: boolean("do_not_contact").notNull().default(false),
+    /**
+     * Per-channel do-not-contact flags, set automatically on hard bounce /
+     * unsubscribe / STOP. Blocks that channel only — the other channel can
+     * keep sending (subject to its own consent and suppression checks).
+     */
+    doNotContactEmail: boolean("do_not_contact_email").notNull().default(false),
+    doNotContactSms: boolean("do_not_contact_sms").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

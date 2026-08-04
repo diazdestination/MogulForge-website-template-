@@ -43,7 +43,15 @@ app.use(
 // CSV lead imports post the raw file contents as a JSON string (up to 5MB
 // of CSV, ~6MB with JSON escaping); the route re-enforces the 5MB CSV cap.
 app.use("/api/v1/lead-imports", express.json({ limit: "8mb" }));
-app.use(express.json());
+// Keep the raw body around for webhook signature verification (Resend/svix
+// signs the exact bytes, not the re-serialized JSON).
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      (req as express.Request & { rawBody?: Buffer }).rawBody = buf;
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true }));
 app.use(authMiddleware);
 

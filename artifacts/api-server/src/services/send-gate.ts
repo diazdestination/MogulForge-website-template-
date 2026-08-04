@@ -208,6 +208,8 @@ export interface SendGateInput {
     email?: string | null;
     phone?: string | null;
     doNotContact?: boolean;
+    doNotContactEmail?: boolean;
+    doNotContactSms?: boolean;
   };
   channel: SendChannel;
   kind: SendKind;
@@ -223,6 +225,15 @@ export async function checkSendEligibility(
   // 1. Hard do-not-contact flag.
   if (contact.doNotContact) {
     return { ok: false, outcome: "blocked", reason: "do_not_contact" };
+  }
+  // 1b. Per-channel do-not-contact (set automatically on hard bounce /
+  // unsubscribe / STOP). Blocks THIS channel only, so a sequence can keep
+  // reaching the contact on the other channel.
+  if (channel === "email" && contact.doNotContactEmail) {
+    return { ok: false, outcome: "blocked", reason: "do_not_contact_email" };
+  }
+  if (channel === "sms" && contact.doNotContactSms) {
+    return { ok: false, outcome: "blocked", reason: "do_not_contact_sms" };
   }
 
   // 2. Address present + structurally valid.
@@ -353,6 +364,8 @@ export async function recordBlockedSend(input: {
 function humanReason(reason: string): string {
   const map: Record<string, string> = {
     do_not_contact: "contact is marked do-not-contact",
+    do_not_contact_email: "contact is marked do-not-email",
+    do_not_contact_sms: "contact is marked do-not-text",
     no_email: "no email address",
     no_phone: "no phone number",
     invalid_email: "invalid email address",

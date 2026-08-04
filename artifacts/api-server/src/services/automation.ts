@@ -611,6 +611,8 @@ async function executeAction(
           phone: contactsTable.phone,
           preferredContactMethod: contactsTable.preferredContactMethod,
           doNotContact: contactsTable.doNotContact,
+          doNotContactEmail: contactsTable.doNotContactEmail,
+          doNotContactSms: contactsTable.doNotContactSms,
         })
         .from(contactsTable)
         .where(
@@ -844,6 +846,8 @@ async function renderTemplate(
     email: string | null;
     phone: string | null;
     doNotContact: boolean;
+    doNotContactEmail: boolean;
+    doNotContactSms: boolean;
   } | null = null;
   let contactId = context.contactId;
   if (!contactId && context.leadId) {
@@ -866,6 +870,8 @@ async function renderTemplate(
         email: contactsTable.email,
         phone: contactsTable.phone,
         doNotContact: contactsTable.doNotContact,
+        doNotContactEmail: contactsTable.doNotContactEmail,
+        doNotContactSms: contactsTable.doNotContactSms,
       })
       .from(contactsTable)
       .where(

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# =============================================================================
+# -----------------------------------------------------------------------------
 # post-merge-sync.test.sh
 #
 # Verifies the end-to-end behaviour of the template-repo sync block in
@@ -16,7 +16,7 @@
 #      the "|| true" tail exits 0 and the sync block is skipped cleanly.
 #   5. When no product directories changed the sync block is skipped and the
 #      script still exits 0 — a no-op merge does not trigger push attempts.
-# =============================================================================
+# -----------------------------------------------------------------------------
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -602,6 +602,95 @@ if [ "$RESULT11" = "true" ]; then
   _pass "Excluded + lib/ diff: SHARED_CHANGED=true (included path not filtered out)"
 else
   _fail "Excluded + lib/ diff: expected SHARED_CHANGED=true, got '$RESULT11'"
+fi
+
+# ---------------------------------------------------------------------------
+# Test 12: Partial push failure — the failing product is named, and any repos
+#          that were never attempted are listed as skipped.
+#
+#          Scenario: CRM push succeeds (mocked), Mobile push fails (mocked),
+#          Website push is never invoked.  The combined output must contain all
+#          three product names so an admin knows exactly what to re-run.
+# ---------------------------------------------------------------------------
+echo ""
+echo "Test 12: Partial push failure — failing product named, skipped products listed"
+
+OUT12="$TMPROOT/out12.txt"
+EXIT12=0
+
+(
+  # Mock push-to-product-repos.sh:
+  #   crm    → exits 0  (success)
+  #   mobile → exits 1  (failure)
+  #   website → should never be called; exits 2 if it is
+  MOCK_PUSH12="$TMPROOT/mock-push12.sh"
+  cat > "$MOCK_PUSH12" << 'MOCKEOF'
+#!/bin/bash
+case "$1" in
+  crm)     echo "CRM push OK (mock)";                      exit 0 ;;
+  mobile)  echo "Mobile push error (mock)" >&2;             exit 1 ;;
+  website) echo "Website should not have been called" >&2;  exit 2 ;;
+  *)       echo "Unknown product: $1" >&2;                  exit 3 ;;
+esac
+MOCKEOF
+  chmod +x "$MOCK_PUSH12"
+
+  # Replicate the queue-based loop from post-merge.sh verbatim, but call the
+  # mock script instead of push-to-product-repos.sh.
+  PUSH_CRM=true
+  PUSH_MOBILE=true
+  PUSH_WEBSITE=true
+
+  PUSH_QUEUE=()
+  if $PUSH_CRM;     then PUSH_QUEUE+=("crm:CRM");       fi
+  if $PUSH_MOBILE;  then PUSH_QUEUE+=("mobile:Mobile");  fi
+  if $PUSH_WEBSITE; then PUSH_QUEUE+=("website:Website"); fi
+
+  for i in "${!PUSH_QUEUE[@]}"; do
+    IFS=: read -r product label <<< "${PUSH_QUEUE[$i]}"
+
+    SKIPPED=()
+    for j in "${!PUSH_QUEUE[@]}"; do
+      if [ "$j" -gt "$i" ]; then
+        IFS=: read -r _ skip_label <<< "${PUSH_QUEUE[$j]}"
+        SKIPPED+=("$skip_label")
+      fi
+    done
+
+    "$MOCK_PUSH12" "$product" || {
+      echo "❌  $label template push FAILED — aborting post-merge." \
+           "Fix the remote configuration or network issue, then re-run." >&2
+      if [ "${#SKIPPED[@]}" -gt 0 ]; then
+        echo "⏭️  Skipped (never attempted): ${SKIPPED[*]}" >&2
+      fi
+      exit 1
+    }
+  done
+) >"$OUT12" 2>&1 || EXIT12=$?
+
+if [ "$EXIT12" -eq 0 ]; then
+  _fail "Test 12: expected non-zero exit when Mobile push fails — got 0"
+  echo "    --- captured output ---"
+  cat "$OUT12"
+  echo "    -----------------------"
+else
+  ISSUES12=()
+  grep -q "CRM"                         "$OUT12" || ISSUES12+=("'CRM' not mentioned in output")
+  grep -q "Mobile"                      "$OUT12" || ISSUES12+=("'Mobile' not mentioned (failing product)")
+  grep -q "Website"                     "$OUT12" || ISSUES12+=("'Website' not listed as skipped")
+  grep -q "❌"                          "$OUT12" || ISSUES12+=("no ❌ failure indicator in output")
+  grep -qi "skipped\|never attempted"  "$OUT12" || ISSUES12+=("no 'skipped / never attempted' message for Website")
+
+  if [ "${#ISSUES12[@]}" -eq 0 ]; then
+    _pass "Partial failure: CRM named (succeeded), Mobile named (failed), Website listed as skipped"
+  else
+    for issue in "${ISSUES12[@]}"; do
+      _fail "Test 12: $issue"
+    done
+    echo "    --- captured output ---"
+    cat "$OUT12"
+    echo "    -----------------------"
+  fi
 fi
 
 # ---------------------------------------------------------------------------

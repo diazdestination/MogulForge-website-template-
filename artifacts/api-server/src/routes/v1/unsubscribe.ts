@@ -11,6 +11,7 @@ import { createHmac } from "node:crypto";
 
 import { rateLimit } from "../../lib/rateLimit";
 import { recordAudit } from "../../services/audit";
+import { recordContactOptOut } from "../../services/delivery-events";
 import { stopEnrollmentsForLead } from "../../services/playbooks";
 import {
   addSuppression,
@@ -86,11 +87,13 @@ router.post(
         ),
       );
     if (contact?.email) {
-      await addSuppression({
+      // Suppresses the address, flips the contact's do-not-email flag,
+      // marks outstanding email touches unsubscribed, and records the
+      // opt-out on each lead's timeline.
+      await recordContactOptOut({
         organizationId,
+        contactId: contact.id,
         channel: "email",
-        value: contact.email,
-        reason: "unsubscribed",
         source: "unsubscribe_link",
       });
       await db.insert(consentRecordsTable).values({
@@ -126,7 +129,7 @@ const STOP_WORDS = new Set(["stop", "stopall", "unsubscribe", "cancel", "end", "
 const START_WORDS = new Set(["start", "unstop", "yes"]);
 
 /** Twilio request-signature check (HMAC-SHA1 of URL + sorted form params). */
-function twilioSignatureValid(req: Request): boolean {
+export function twilioSignatureValid(req: Request): boolean {
   const token = process.env.TWILIO_AUTH_TOKEN;
   if (!token) return true; // dev / mock provider: nothing to validate against
   const signature = req.headers["x-twilio-signature"];
@@ -178,6 +181,10 @@ router.post(
       );
 
     const seenOrgs = new Set<string>();
+    // START: suppression rows are org-scoped, so remember the per-org lift
+    // result — every matched contact in a lifted org must be re-enabled,
+    // not just the first one that happened to remove the row.
+    const orgLifted = new Map<string, boolean>();
     for (const contact of matches) {
       if (STOP_WORDS.has(keyword)) {
         if (!seenOrgs.has(contact.organizationId)) {
@@ -191,6 +198,13 @@ router.post(
             detail: keyword,
           });
         }
+        // Per-channel DNC flag + touch delivery + timeline entry.
+        await recordContactOptOut({
+          organizationId: contact.organizationId,
+          contactId: contact.id,
+          channel: "sms",
+          source: "twilio_inbound",
+        });
         await db.insert(consentRecordsTable).values({
           organizationId: contact.organizationId,
           contactId: contact.id,
@@ -214,11 +228,21 @@ router.post(
         // START/UNSTOP: only lift a suppression the STOP flow created —
         // an unauthenticated START can't undo an unsubscribe-link or
         // bounce suppression.
-        const removed = await removeSuppressionIfStopKeyword(
-          contact.organizationId,
-          from,
-        );
+        let removed = orgLifted.get(contact.organizationId);
+        if (removed === undefined) {
+          removed = await removeSuppressionIfStopKeyword(
+            contact.organizationId,
+            from,
+          );
+          orgLifted.set(contact.organizationId, removed);
+        }
         if (removed) {
+          // The STOP flow set the per-channel DNC flag; START must clear it
+          // or the send gate keeps blocking SMS forever.
+          await db
+            .update(contactsTable)
+            .set({ doNotContactSms: false })
+            .where(eq(contactsTable.id, contact.id));
           await db.insert(consentRecordsTable).values({
             organizationId: contact.organizationId,
             contactId: contact.id,

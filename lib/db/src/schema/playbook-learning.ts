@@ -42,6 +42,18 @@ export const playbookTouchesTable = pgTable(
     /** UTC hour (0-23) the touch went out — send-window learning input. */
     sentHourUtc: integer("sent_hour_utc").notNull(),
     sentAt: timestamp("sent_at", { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Provider message id (Resend email id / Twilio message SID) — lets
+     * delivery webhooks correlate back to the exact touch they refer to.
+     */
+    providerMessageId: text("provider_message_id"),
+    /**
+     * Delivery signal from the provider: null until observed, then
+     * "delivered" | "bounced" | "unsubscribed". Bounce/unsubscribe always
+     * wins over delivered (a recipient can open then unsubscribe).
+     */
+    delivery: text("delivery"),
+    deliveryAt: timestamp("delivery_at", { withTimezone: true }),
     /** Outcome chain: null until the corresponding event is observed. */
     repliedAt: timestamp("replied_at", { withTimezone: true }),
     bookedAt: timestamp("booked_at", { withTimezone: true }),
@@ -60,6 +72,7 @@ export const playbookTouchesTable = pgTable(
       table.organizationId,
       table.leadId,
     ),
+    index("playbook_touches_provider_msg_idx").on(table.providerMessageId),
   ],
 );
 

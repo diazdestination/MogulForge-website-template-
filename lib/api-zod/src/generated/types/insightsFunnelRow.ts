@@ -13,6 +13,9 @@ export interface InsightsFunnelRow {
   variantKey: string;
   channel: string;
   sent: number;
+  delivered: number;
+  bounced: number;
+  unsubscribed: number;
   replied: number;
   booked: number;
   won: number;

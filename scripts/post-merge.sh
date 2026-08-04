@@ -76,19 +76,33 @@ if ! $PUSH_CRM && ! $PUSH_MOBILE && ! $PUSH_WEBSITE; then
 else
   echo "--- Syncing changed template repos ---"
 
-  # _push_product runs the push and FAILS LOUDLY on any error so post-merge
-  # exits non-zero and blocks the merge.  A failed push must never be silent.
-  _push_product() {
-    local product="$1"
-    local label="$2"
+  # Build an ordered push queue so that a mid-run failure can report both
+  # the broken product AND every repo that was skipped because of the early exit.
+  PUSH_QUEUE=()
+  if $PUSH_CRM;     then PUSH_QUEUE+=("crm:CRM");       fi
+  if $PUSH_MOBILE;  then PUSH_QUEUE+=("mobile:Mobile");  fi
+  if $PUSH_WEBSITE; then PUSH_QUEUE+=("website:Website"); fi
+
+  for i in "${!PUSH_QUEUE[@]}"; do
+    IFS=: read -r product label <<< "${PUSH_QUEUE[$i]}"
+
+    # Collect every repo that comes after this one — they would be skipped on
+    # failure and the admin needs to know which ones never ran.
+    SKIPPED=()
+    for j in "${!PUSH_QUEUE[@]}"; do
+      if [ "$j" -gt "$i" ]; then
+        IFS=: read -r _ skip_label <<< "${PUSH_QUEUE[$j]}"
+        SKIPPED+=("$skip_label")
+      fi
+    done
+
     bash "$SCRIPT_DIR/push-to-product-repos.sh" "$product" || {
       echo "❌  $label template push FAILED — aborting post-merge." \
            "Fix the remote configuration or network issue, then re-run." >&2
+      if [ "${#SKIPPED[@]}" -gt 0 ]; then
+        echo "⏭️  Skipped (never attempted): ${SKIPPED[*]}" >&2
+      fi
       exit 1
     }
-  }
-
-  if $PUSH_CRM;     then _push_product crm     "CRM";     fi
-  if $PUSH_MOBILE;  then _push_product mobile  "Mobile";  fi
-  if $PUSH_WEBSITE; then _push_product website "Website"; fi
+  done
 fi

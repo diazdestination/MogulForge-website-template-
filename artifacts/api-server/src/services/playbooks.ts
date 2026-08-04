@@ -676,6 +676,7 @@ export async function executePlaybookStep(
       variantKey: variant.key,
       channel: step.channel,
       provider: sendResult.provider,
+      providerMessageId: sendResult.id,
     });
     await db.insert(activitiesTable).values({
       organizationId,

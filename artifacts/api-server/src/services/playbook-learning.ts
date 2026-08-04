@@ -258,6 +258,8 @@ export async function recordTouch(entry: {
   variantKey: string;
   channel: string;
   provider: string;
+  /** Provider message id (Resend id / Twilio SID) for delivery webhooks. */
+  providerMessageId?: string | null;
 }): Promise<void> {
   const now = new Date();
   await db.insert(playbookTouchesTable).values({
@@ -315,6 +317,9 @@ export interface InsightsFunnelRow {
   variantKey: string;
   channel: string;
   sent: number;
+  delivered: number;
+  bounced: number;
+  unsubscribed: number;
   replied: number;
   booked: number;
   won: number;
@@ -349,6 +354,9 @@ export async function getConversionInsights(
       variantKey: playbookTouchesTable.variantKey,
       channel: playbookTouchesTable.channel,
       sent: sql<number>`count(*)::int`,
+      delivered: sql<number>`count(*) filter (where ${playbookTouchesTable.delivery} = 'delivered')::int`,
+      bounced: sql<number>`count(*) filter (where ${playbookTouchesTable.delivery} = 'bounced')::int`,
+      unsubscribed: sql<number>`count(*) filter (where ${playbookTouchesTable.delivery} = 'unsubscribed')::int`,
       replied: sql<number>`count(${playbookTouchesTable.repliedAt})::int`,
       booked: sql<number>`count(${playbookTouchesTable.bookedAt})::int`,
       won: sql<number>`count(*) filter (where ${playbookTouchesTable.finalOutcome} = 'won')::int`,

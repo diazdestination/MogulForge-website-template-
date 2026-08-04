@@ -6769,7 +6769,7 @@ components:
           type: string
     InsightsFunnelRow:
       type: object
-      required: [playbookId, playbookName, stepIndex, variantKey, channel, sent, replied, booked, won, lost]
+      required: [playbookId, playbookName, stepIndex, variantKey, channel, sent, delivered, bounced, unsubscribed, replied, booked, won, lost]
       properties:
         playbookId:
           type: string
@@ -6783,6 +6783,12 @@ components:
         channel:
           type: string
         sent:
+          type: number
+        delivered:
+          type: number
+        bounced:
+          type: number
+        unsubscribed:
           type: number
         replied:
           type: number

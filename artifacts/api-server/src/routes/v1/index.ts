@@ -29,6 +29,7 @@ import googleReviewsRouter from "./google-reviews";
 import orgsRouter from "./orgs";
 import onboardingRouter from "./onboarding";
 import reportsRouter from "./reports";
+import deliveryStatusRouter from "./delivery-status";
 
 const router: IRouter = Router();
 
@@ -56,6 +57,7 @@ router.use(webhooksRouter);
 router.use(tagsRouter);
 router.use(publicRouter);
 router.use(unsubscribeRouter);
+router.use(deliveryStatusRouter);
 router.use(storageRouter);
 router.use(portalRouter);
 router.use(googleReviewsRouter);

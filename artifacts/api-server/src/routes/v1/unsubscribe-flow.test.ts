@@ -23,6 +23,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import app from "../../app";
 import {
   buildUnsubscribeToken,
+  checkSendEligibility,
   getSuppression,
 } from "../../services/send-gate";
 import { deleteTestOrgs } from "../../test-helpers/delete-test-orgs";
@@ -171,10 +172,32 @@ describe("inbound SMS STOP/START", () => {
     expect(consent?.granted).toBe(false);
   });
 
-  it("START lifts only a STOP suppression and re-grants consent", async () => {
+  it("STOP flips the contact's per-channel do-not-text flag", async () => {
+    const [row] = await db
+      .select()
+      .from(contactsTable)
+      .where(eq(contactsTable.id, contact.id));
+    expect(row.doNotContactSms).toBe(true);
+  });
+
+  it("START lifts only a STOP suppression, clears the flag, and re-grants consent", async () => {
     const res = await inbound("555-867-5309", "START");
     expect(res.status).toBe(200);
     expect(await getSuppression(org.id, "sms", "5558675309")).toBeNull();
+
+    // Per-channel DNC flag must be cleared or the send gate keeps blocking.
+    const [row] = await db
+      .select()
+      .from(contactsTable)
+      .where(eq(contactsTable.id, contact.id));
+    expect(row.doNotContactSms).toBe(false);
+    const gate = await checkSendEligibility({
+      organizationId: org.id,
+      contact: row,
+      channel: "sms",
+      kind: "transactional",
+    });
+    expect(gate).toEqual({ ok: true });
 
     const [consent] = await db
       .select()
@@ -189,6 +212,36 @@ describe("inbound SMS STOP/START", () => {
       .orderBy(desc(consentRecordsTable.recordedAt))
       .limit(1);
     expect(consent?.granted).toBe(true);
+  });
+
+  it("STOP then START handles multiple contacts sharing a number in one org", async () => {
+    const [c1] = await db
+      .insert(contactsTable)
+      .values({ organizationId: org.id, firstName: "TwinA", phone: "+15559990001" })
+      .returning();
+    const [c2] = await db
+      .insert(contactsTable)
+      .values({ organizationId: org.id, firstName: "TwinB", phone: "555-999-0001" })
+      .returning();
+
+    await inbound("+15559990001", "STOP");
+    let rows = await db
+      .select()
+      .from(contactsTable)
+      .where(eq(contactsTable.organizationId, org.id));
+    for (const id of [c1.id, c2.id]) {
+      expect(rows.find((r) => r.id === id)?.doNotContactSms).toBe(true);
+    }
+
+    await inbound("+15559990001", "START");
+    rows = await db
+      .select()
+      .from(contactsTable)
+      .where(eq(contactsTable.organizationId, org.id));
+    for (const id of [c1.id, c2.id]) {
+      expect(rows.find((r) => r.id === id)?.doNotContactSms).toBe(false);
+    }
+    expect(await getSuppression(org.id, "sms", "5559990001")).toBeNull();
   });
 
   it("START does NOT lift a non-STOP suppression (e.g. hard bounce)", async () => {
