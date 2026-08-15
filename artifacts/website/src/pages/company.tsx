@@ -128,7 +128,7 @@ export function ReviewsPage() {
   );
 }
 
-function GalleryImage({ src, alt }: { src: string; alt: string }) {
+function GalleryImage({ src, alt, srcSet, sizes }: { src: string; alt: string; srcSet?: string; sizes?: string }) {
   const [loaded, setLoaded] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
 
@@ -154,7 +154,10 @@ function GalleryImage({ src, alt }: { src: string; alt: string }) {
         />
       )}
       <picture>
-        {isWebp && <source srcSet={src} type="image/webp" />}
+        {/* WebP source: use responsive size cuts when provided, else single WebP */}
+        {(srcSet || isWebp) && (
+          <source srcSet={srcSet ?? src} type="image/webp" sizes={sizes} />
+        )}
         <img
           ref={imgRef}
           src={fallbackSrc}
@@ -210,18 +213,28 @@ export function GalleryPage() {
       <section className="pb-16">
         <div className="container mx-auto px-4 max-w-6xl">
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {projects.map((p) => (
-              <div key={p.img} className="rounded-2xl overflow-hidden bg-card/40 border border-card-border flex flex-col group">
-                <div className="aspect-[4/3] overflow-hidden">
-                  <GalleryImage src={p.img} alt={`${p.title} — ${p.where}`} />
+            {projects.map((p) => {
+              // Derive the stem (strip extension) to build responsive WebP srcset paths.
+              // p.img is e.g. `${base}gallery/job-02.webp` or `…/fb-job-01.jpg`
+              const stem = p.img.replace(/\.[^.]+$/, '');
+              return (
+                <div key={p.img} className="rounded-2xl overflow-hidden bg-card/40 border border-card-border flex flex-col group">
+                  <div className="aspect-[4/3] overflow-hidden">
+                    <GalleryImage
+                      src={p.img}
+                      alt={`${p.title} — ${p.where}`}
+                      srcSet={`${stem}-400.webp 400w, ${stem}-800.webp 800w`}
+                      sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
+                    />
+                  </div>
+                  <div className="p-5 flex flex-col flex-1">
+                    <h2 className="font-display font-semibold text-white text-base mb-1">{p.title}</h2>
+                    <p className="text-xs uppercase tracking-wider text-primary/80 mb-2">{p.where}</p>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{p.detail}</p>
+                  </div>
                 </div>
-                <div className="p-5 flex flex-col flex-1">
-                  <h2 className="font-display font-semibold text-white text-base mb-1">{p.title}</h2>
-                  <p className="text-xs uppercase tracking-wider text-primary/80 mb-2">{p.where}</p>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{p.detail}</p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </section>

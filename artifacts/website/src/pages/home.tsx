@@ -35,10 +35,15 @@ export default function HomePage() {
 
       {/* Hero */}
       <section className="relative pt-24 pb-28 overflow-hidden">
-        {/* Real job photo background */}
+        {/* Real job photo background — mobile gets the 800px WebP, desktop gets 1440px */}
         <div
-          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
-          style={{ backgroundImage: `url(${import.meta.env.BASE_URL}gallery/fb-job-01.jpg)` }}
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat md:hidden"
+          style={{ backgroundImage: `url(${import.meta.env.BASE_URL}gallery/fb-job-01-800.webp)` }}
+          aria-hidden
+        />
+        <div
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat hidden md:block"
+          style={{ backgroundImage: `url(${import.meta.env.BASE_URL}gallery/fb-job-01-1440.webp)` }}
           aria-hidden
         />
         {/* Dark overlay so text stays legible */}
