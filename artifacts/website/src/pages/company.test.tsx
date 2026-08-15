@@ -124,11 +124,12 @@ describe('GalleryPage — gallery images render correctly', () => {
 
   it('WebP job images fall back to JPEG: <source> carries the .webp and <img> src is .jpg', () => {
     render(<GalleryPage />);
-    // Every <source type="image/webp"> must point to a .webp file
+    // Every <source type="image/webp"> must reference .webp files (srcset may
+    // be a responsive descriptor list like "foo-400.webp 400w, foo-800.webp 800w")
     const sources = document.querySelectorAll<HTMLSourceElement>('source[type="image/webp"]');
     expect(sources.length).toBeGreaterThan(0);
     for (const src of Array.from(sources)) {
-      expect(src.srcset).toMatch(/\.webp$/);
+      expect(src.srcset).toContain('.webp');
     }
     // The corresponding <img> inside each <picture> must have the .jpg fallback
     const pictures = document.querySelectorAll('picture');
@@ -165,7 +166,7 @@ describe('GalleryPage — gallery images render correctly', () => {
     }
   });
 
-  it('dismisses the loading skeleton when an image fails to load', async () => {
+  it('shows a branded placeholder when an image fails to load', async () => {
     await act(async () => { render(<GalleryPage />); });
 
     const img = document.querySelector<HTMLImageElement>('img[src*="gallery/"]');
@@ -174,11 +175,19 @@ describe('GalleryPage — gallery images render correctly', () => {
     // Image starts hidden (skeleton visible) because jsdom never fires onLoad
     expect(img!.classList.contains('opacity-0')).toBe(true);
 
-    // Fire an error event (e.g. 404 or network timeout)
+    // Capture the alt text so we can find the replacement placeholder
+    const altText = img!.getAttribute('alt') ?? '';
+
+    // Fire an error event (e.g. 404 or network timeout on the fallback JPEG)
     await act(async () => { fireEvent.error(img!); });
 
-    // The skeleton must clear so the card stays usable instead of blank forever
-    expect(img!.classList.contains('opacity-0')).toBe(false);
+    // The broken image is replaced by a branded placeholder that carries the
+    // original alt text as its accessible label — the card stays presentable.
+    const placeholder = document.querySelector(`[role="img"][aria-label="${altText}"]`);
+    expect(placeholder).not.toBeNull();
+
+    // The original <img> element must be gone (replaced by the placeholder div)
+    expect(document.querySelector(`img[alt="${altText}"]`)).toBeNull();
   });
 });
 

@@ -130,6 +130,7 @@ export function ReviewsPage() {
 
 function GalleryImage({ src, alt, srcSet, sizes }: { src: string; alt: string; srcSet?: string; sizes?: string }) {
   const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
 
   // Catch images that were already decoded before React attached the listener
@@ -144,6 +145,23 @@ function GalleryImage({ src, alt, srcSet, sizes }: { src: string; alt: string; s
   // Derive JPEG fallback: swap .webp → .jpg; JPEGs are their own fallback
   const fallbackSrc = src.endsWith('.webp') ? src.replace(/\.webp$/, '.jpg') : src;
   const isWebp = src.endsWith('.webp');
+
+  if (failed) {
+    return (
+      <div
+        className="w-full h-full flex flex-col items-center justify-center gap-3 bg-gradient-to-br from-primary/20 to-primary/5"
+        role="img"
+        aria-label={alt}
+      >
+        {/* Brand logo mark */}
+        <svg viewBox="0 0 40 36" className="w-10 h-10 text-primary/70" fill="currentColor" aria-hidden>
+          <path d="M20 0 L40 18 L34 18 L34 36 L6 36 L6 18 L0 18 Z" />
+        </svg>
+        <span className="text-xs text-primary/50 font-medium tracking-wide uppercase">Painless Roofing</span>
+      </div>
+    );
+  }
+
   return (
     <div className="relative w-full h-full">
       {/* Skeleton shown until the image is ready or has errored */}
@@ -166,7 +184,7 @@ function GalleryImage({ src, alt, srcSet, sizes }: { src: string; alt: string; s
           loading="lazy"
           decoding="async"
           onLoad={() => setLoaded(true)}
-          onError={() => setLoaded(true)}
+          onError={() => { setLoaded(true); setFailed(true); }}
         />
       </picture>
     </div>
@@ -193,6 +211,23 @@ export function GalleryPage() {
     { img: `${base}gallery/fb-job-01.jpg`, title: 'Full system — roof, gutters & standing seam metal', where: 'Canton, GA', detail: 'Travelers insurance covered a brand-new architectural shingle roof, complete gutter system, and standing seam metal sections after confirmed wind and hail damage. Duration shingles, ABC Supply materials.' },
     { img: `${base}gallery/fb-job-02.jpg`, title: 'Standing seam metal detail — insurance claim', where: 'Canton, GA', detail: 'Close-up of the standing seam metal sections on the same Travelers claim job. Clean seam lines and tight flashing transitions where metal meets shingle — a common failure point we address on every job.' },
     { img: `${base}gallery/fb-job-03.jpg`, title: 'Complete shingle replacement — Owens Corning', where: 'Canton, GA', detail: 'Full re-roof on a large two-story home using Owens Corning architectural shingles. New ventilation system and full perimeter drip edge included in the insurance scope.' },
+    { img: `${base}gallery/metal-01.jpg`, title: 'Full charcoal metal roof — sunset aerial', where: 'Jasper, GA', detail: 'Complete corrugated standing seam metal installation at end-of-day. Dark charcoal finish chosen for longevity and curb appeal — metal roofs routinely outlast two shingle lifespans.' },
+    { img: `${base}gallery/metal-02.jpg`, title: 'Standing seam metal — full replacement', where: 'Jasper, GA', detail: 'Charcoal corrugated metal over a home with a brick chimney. Chimney flashing and all penetrations sealed to manufacturer spec; same-day estimate preceded this install by less than a week.' },
+    { img: `${base}gallery/metal-03.jpg`, title: 'Dark corrugated metal — wooded lot', where: 'Dahlonega, GA', detail: 'Tight ridge cap and clean panel alignment on a heavily wooded property. Metal was the right call here — low maintenance and no debris accumulation issues like asphalt on a shaded roof.' },
+    { img: `${base}gallery/metal-04.jpg`, title: 'Rural property — full metal re-roof', where: 'Dawsonville, GA', detail: 'Dark brown corrugated metal on a rural home with rolling pasture behind it. Customer wanted a lifetime roof that matched the farmhouse aesthetic — competitive pricing, completed in two days.' },
+    { img: `${base}gallery/metal-05.jpg`, title: 'White standing seam — multi-pitch home', where: 'Dawsonville, GA', detail: 'Bright white standing seam across multiple pitches with original brick chimney retained and re-flashed. Clean winter install — no weather delays, job finished in one continuous run.' },
+    { img: `${base}gallery/metal-06.jpg`, title: 'Galvanized metal — farm structure', where: 'Jasper, GA', detail: 'Galvanized corrugated metal on a farm outbuilding. Durable, low-cost, and rated for decades of North Georgia weather. We bring the same care to agricultural and outbuilding work as to any home.' },
+    { img: `${base}gallery/metal-07.jpg`, title: 'Metal porch roof — two-tone addition', where: 'North Georgia', detail: 'Dark charcoal metal porch cover added to match the main structure. We handle porch, carport, and addition roofing — not just full replacements. Same-day estimate, quick turnaround.' },
+    { img: `${base}gallery/metal-08.jpg`, title: 'Standing seam install — in progress', where: 'Canton, GA', detail: 'Mid-installation view of new standing seam panels going down alongside the existing shingle field. Partial metal additions are a popular upgrade for porch sections and dormers.' },
+    { img: `${base}gallery/metal-09.jpg`, title: 'Hybrid metal + shingle — section upgrade', where: 'Canton, GA', detail: 'Charcoal standing seam added to a flat/low-slope section where shingles were failing. Mixing materials on complex rooflines is a specialty — each transition is hand-detailed and sealed.' },
+    { img: `${base}gallery/metal-10.jpg`, title: 'Light galvanized metal — full re-roof', where: 'North Georgia', detail: 'Light gray corrugated metal covering a full footprint just before dusk. Crew truck visible — this was a same-day completion. Metal installs move fast compared to shingle tear-offs.' },
+    { img: `${base}gallery/fb-job-04.jpg`, title: 'Shingle replacement — Safeco claim, full coverage', where: 'Canton, GA', detail: 'This replacement was approved and covered by Safeco due to storm damage. We assisted with the inspection, submitted all required documentation, and worked directly with the adjuster — homeowner received the full benefit of their coverage.' },
+    { img: `${base}gallery/fb-job-05.jpg`, title: 'Full shingle replacement — craftsman home', where: 'North Georgia', detail: 'Clean charcoal architectural shingles on a distinctive two-story craftsman. New ridge cap and chimney flashing throughout. Same-day estimate, completed in one run.' },
+    { img: `${base}gallery/fb-job-06.jpg`, title: 'Shingle replacement — wooded lot, summer', where: 'Cherokee County, GA', detail: 'Dark charcoal architectural shingles on a home surrounded by mature hardwoods. Chimney re-flashed and sealed. Debris management included — wooded lots require extra cleanup on every visit.' },
+    { img: `${base}gallery/damage-01.jpg`, title: 'Why we get called — Talking Rock hailstorm', where: 'Talking Rock, GA', detail: 'Golf-ball and larger hail fell in Talking Rock — a local resident documented stones spanning a full hand. Hail this size leaves impact craters on every exposed shingle surface. Call us within 24 hours of a storm like this.' },
+    { img: `${base}gallery/damage-02.jpg`, title: 'Active roof failure — water intrusion after hail', where: 'Talking Rock, GA', detail: 'Hailstones streaming through a compromised ceiling into a living room — documented the same night as the storm. This is exactly what we prevent: emergency tarping within hours, water restoration started the next morning.' },
+    { img: `${base}gallery/before-after-01-before.jpg`, title: 'Before — aged shingles, storm damage confirmed', where: 'North Georgia', detail: 'The old roof before our free inspection. Storm-related damage was confirmed, documented, and submitted to insurance. Tarp staged on-site while the claim was processed — homeowner paid $0 out of pocket.' },
+    { img: `${base}gallery/before-after-01-after.jpg`, title: 'After — $0 out-of-pocket insurance replacement', where: 'North Georgia', detail: 'Finished light gray architectural shingles on the same home. Free inspection → insurance approval → complete replacement, all handled by our team. This homeowner never wrote a check.' },
   ];
   return (
     <div className="flex-1">
