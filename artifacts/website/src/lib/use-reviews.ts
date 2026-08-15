@@ -35,7 +35,7 @@ export function useReviews(): { reviews: DisplayReview[]; isLive: boolean } {
     },
   });
 
-  if (data && !data.isFallback && data.reviews.length > 0) {
+  if (data && !data.isFallback && data.reviews?.length > 0) {
     const reviews: DisplayReview[] = data.reviews.map((r) => ({
       quote: r.text,
       who: r.reviewerName,

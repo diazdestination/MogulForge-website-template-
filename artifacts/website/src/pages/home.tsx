@@ -35,6 +35,14 @@ export default function HomePage() {
 
       {/* Hero */}
       <section className="relative pt-24 pb-28 overflow-hidden">
+        {/* Real job photo background */}
+        <div
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+          style={{ backgroundImage: `url(${import.meta.env.BASE_URL}gallery/fb-job-01.jpg)` }}
+          aria-hidden
+        />
+        {/* Dark overlay so text stays legible */}
+        <div className="absolute inset-0 bg-background/80" aria-hidden />
         <div className="container mx-auto px-4 relative z-10">
           <div className="max-w-4xl mx-auto text-center">
             <motion.div
@@ -46,7 +54,7 @@ export default function HomePage() {
               <div className="px-5 py-2 rounded-full border border-primary/20 bg-primary/5 backdrop-blur-md flex items-center gap-2 mb-3 shadow-[0_0_15px_rgba(56,189,248,0.1)]">
                 <span className="text-sm font-medium text-primary">{BUSINESS.name}</span>
               </div>
-              <span className="text-[11px] text-muted-foreground uppercase tracking-[0.2em] font-semibold">Powered by MogulForge GrowthOS</span>
+              <span className="text-[11px] text-muted-foreground uppercase tracking-[0.2em] font-semibold">Canton, GA · Licensed &amp; Insured · Family-Owned</span>
             </motion.div>
 
             <motion.h1

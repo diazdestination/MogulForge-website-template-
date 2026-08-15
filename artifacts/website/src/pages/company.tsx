@@ -1,5 +1,5 @@
 import { Link } from 'wouter';
-import { ArrowRight, HeartHandshake, MessageSquareQuote, ShieldCheck, Star, Wrench } from 'lucide-react';
+import { ArrowRight, HeartHandshake, MessageSquareQuote, Star, Wrench } from 'lucide-react';
 import { GoogleReviewCta } from '@/components/google-review-cta';
 import { Seo, breadcrumbJsonLd, localBusinessJsonLd } from '@/lib/seo';
 import { Breadcrumbs, CtaSection, PageHero, SectionHeading } from '@/components/page-blocks';
@@ -128,19 +128,31 @@ export function ReviewsPage() {
 }
 
 export function GalleryPage() {
+  // Paths are relative so Vite's BASE_URL prefix is applied correctly under
+  // both "/" and "/site/" deployments. Never use root-absolute "/gallery/…" here.
+  const base = import.meta.env.BASE_URL; // always ends with "/"
   const projects = [
-    { title: 'Full architectural shingle replacement', where: 'Canton, GA', detail: 'Hail claim — complete tear-off, deck repairs on two slopes, ridge ventilation added.' },
-    { title: 'Standing-seam metal installation', where: 'Dawsonville, GA', detail: 'Exposed ridgeline lot; wind-rated standing-seam system replacing 18-year-old asphalt.' },
-    { title: 'Emergency tarp to full restoration', where: 'Gainesville, GA', detail: 'Tree strike through the deck — tarped overnight, rebuilt and reshingled the same week.' },
-    { title: 'Water damage recovery', where: 'Atlanta, GA', detail: 'Attic leak into two finished rooms — dried, treated, and restored with the roof repair.' },
-    { title: 'Seamless gutter system with guards', where: 'Cumming, GA', detail: 'Oversized downspouts and guards under heavy hardwood canopy near the lake.' },
-    { title: 'Designer shingle upgrade', where: 'Alpharetta, GA', detail: 'HOA-approved designer profile with full flashing replacement and cleanup.' },
+    { img: `${base}gallery/job-01.jpg`, title: 'Architectural shingle replacement', where: 'Canton, GA', detail: 'Hail claim — complete tear-off, deck repairs on two slopes, ridge ventilation added.' },
+    { img: `${base}gallery/job-02.jpg`, title: 'Full roof replacement', where: 'Canton, GA', detail: 'Aerial view of completed system on a large two-story home — new shingles, flashing, and ridge cap throughout.' },
+    { img: `${base}gallery/job-03.jpg`, title: 'Close-detail shingle work', where: 'Cherokee County, GA', detail: 'Clean ridge line and uniform shingle layout; part of a full hail-damage restoration.' },
+    { img: `${base}gallery/job-04.jpg`, title: 'Storm damage restoration', where: 'Cumming, GA', detail: 'Post-storm assessment confirmed impact damage; tear-off and replacement completed within five days of claim approval.' },
+    { img: `${base}gallery/job-05.jpg`, title: 'Shingle replacement — large footprint', where: 'Canton, GA', detail: 'Multi-pitch home with complex valleys; all flashing replaced and sealed to manufacturer spec.' },
+    { img: `${base}gallery/job-06.jpg`, title: 'Complete tear-off and rebuild', where: 'Gainesville, GA', detail: 'Aging asphalt removed, decking inspected and spot-repaired, new 30-year architectural shingles installed.' },
+    { img: `${base}gallery/job-07.jpg`, title: 'Aerial — completed replacement', where: 'Dawsonville, GA', detail: 'Aerial shot on job completion day. Customer requested drone documentation for insurance records.' },
+    { img: `${base}gallery/job-08.jpg`, title: 'Residential re-roof', where: 'Alpharetta, GA', detail: 'HOA-approved shingle color; full perimeter drip edge replaced and all penetrations re-flashed.' },
+    { img: `${base}gallery/job-09.jpg`, title: 'Storm response — rapid replacement', where: 'Canton, GA', detail: 'Emergency tarped overnight after severe storm; full replacement completed by end of week.' },
+    { img: `${base}gallery/job-10.jpg`, title: 'Steep-pitch shingle work', where: 'Cherokee County, GA', detail: 'Safety-harnessed crew on a steep-pitch section; ice-and-water shield added at all eaves per code.' },
+    { img: `${base}gallery/job-11.jpg`, title: 'New roof — wooded lot', where: 'North Georgia', detail: 'Extra debris management on heavily wooded property; gutters cleaned and resealed on completion.' },
+    { img: `${base}gallery/job-12.jpg`, title: 'Full replacement — before & after', where: 'Canton, GA', detail: 'Replacement on a mid-sized ranch; new ventilation system added to extend the life of the new roof.' },
+    { img: `${base}gallery/fb-job-01.jpg`, title: 'Full system — roof, gutters & standing seam metal', where: 'Canton, GA', detail: 'Travelers insurance covered a brand-new architectural shingle roof, complete gutter system, and standing seam metal sections after confirmed wind and hail damage. Duration shingles, ABC Supply materials.' },
+    { img: `${base}gallery/fb-job-02.jpg`, title: 'Standing seam metal detail — insurance claim', where: 'Canton, GA', detail: 'Close-up of the standing seam metal sections on the same Travelers claim job. Clean seam lines and tight flashing transitions where metal meets shingle — a common failure point we address on every job.' },
+    { img: `${base}gallery/fb-job-03.jpg`, title: 'Complete shingle replacement — Owens Corning', where: 'Canton, GA', detail: 'Full re-roof on a large two-story home using Owens Corning architectural shingles. New ventilation system and full perimeter drip edge included in the insurance scope.' },
   ];
   return (
     <div className="flex-1">
       <Seo
         title="Project Gallery — Recent Roofing Work"
-        description="Recent roofing and restoration projects by Painless Roofing & Water Restoration across Canton, Atlanta, and North Georgia."
+        description="Photos from real completed roofing and restoration projects by Painless Roofing & Water Restoration across Canton, Gainesville, Cumming, and North Georgia."
         path="/gallery"
         jsonLd={breadcrumbJsonLd([{ name: 'Home', path: '/' }, { name: 'Project Gallery', path: '/gallery' }])}
       />
@@ -149,18 +161,28 @@ export function GalleryPage() {
       </div>
       <PageHero
         eyebrow="Project Gallery"
-        title="Recent work, real addresses, no stock photos."
-        lede="A sample of recent projects across our service area. Project photography is being added as jobs complete — ask us for photos from work near you."
+        title="Real jobs. Real roofs. No stock photos."
+        lede="Photos from completed projects across our North Georgia service area. Every image is from an actual job site."
       />
       <section className="pb-16">
-        <div className="container mx-auto px-4 max-w-5xl">
+        <div className="container mx-auto px-4 max-w-6xl">
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {projects.map((p) => (
-              <div key={p.title} className="p-7 rounded-3xl bg-card/40 border border-card-border flex flex-col">
-                <ShieldCheck aria-hidden className="w-6 h-6 text-primary mb-4" />
-                <h2 className="font-display font-semibold text-white text-lg mb-1">{p.title}</h2>
-                <p className="text-xs uppercase tracking-wider text-primary/80 mb-3">{p.where}</p>
-                <p className="text-sm text-muted-foreground leading-relaxed">{p.detail}</p>
+              <div key={p.img} className="rounded-2xl overflow-hidden bg-card/40 border border-card-border flex flex-col group">
+                <div className="aspect-[4/3] overflow-hidden">
+                  <img
+                    src={p.img}
+                    alt={`${p.title} — ${p.where}`}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 motion-reduce:transition-none"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                </div>
+                <div className="p-5 flex flex-col flex-1">
+                  <h2 className="font-display font-semibold text-white text-base mb-1">{p.title}</h2>
+                  <p className="text-xs uppercase tracking-wider text-primary/80 mb-2">{p.where}</p>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{p.detail}</p>
+                </div>
               </div>
             ))}
           </div>

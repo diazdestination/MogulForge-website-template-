@@ -1,18 +1,15 @@
 #!/bin/bash
 set -e
 pnpm install --frozen-lockfile
-pnpm --filter db push
 pnpm run typecheck
-echo "--- API smoke test ---"
-pnpm --filter @workspace/api-server run smoke
 echo "--- Website smoke test ---"
 pnpm --filter @workspace/website run smoke
 
 # ---------------------------------------------------------------------------
 # Conditional template-repo sync
 #
-# Detect which product directories (and shared dirs) changed in this merge
-# and push only the affected template repos.  If a remote is not yet
+# Detect whether the website directory (or shared dirs) changed in this merge
+# and push the website template repo if so.  If the remote is not yet
 # configured the push is skipped with a warning so the rest of post-merge
 # still succeeds.
 # ---------------------------------------------------------------------------
@@ -32,8 +29,7 @@ _changed_in() {
 
 # Paths excluded from the "shared changed" check.
 # Files that match any of these patterns are ignored when deciding whether a
-# shared-dir edit should trigger a push to all three template repos.  Add to
-# this list for doc-only or maintenance files that carry no runtime impact:
+# shared-dir edit should trigger a push to the website template repo.
 #
 #   scripts/post-merge.sh  — edits to this script are meta / infra, not product
 #   *.md                   — documentation changes never affect runtime behaviour
@@ -56,31 +52,22 @@ _shared_changed_in() {
   [ -n "$SHARED_CHANGED_FILES" ] && echo "$SHARED_CHANGED_FILES" | grep -q "^${1}"
 }
 
-# Shared dirs: a change here affects every template repo.
+# Shared dirs: a change here affects the website template repo.
 # Note: uses the filtered file list so excluded paths (above) never trigger a push.
 SHARED_CHANGED=false
-if _shared_changed_in "artifacts/api-server/" || _shared_changed_in "lib/" || _shared_changed_in "scripts/"; then
+if _shared_changed_in "lib/" || _shared_changed_in "scripts/"; then
   SHARED_CHANGED=true
 fi
 
-PUSH_CRM=false
-PUSH_MOBILE=false
 PUSH_WEBSITE=false
+if $SHARED_CHANGED || _changed_in "artifacts/website/"; then PUSH_WEBSITE=true; fi
 
-if $SHARED_CHANGED || _changed_in "artifacts/command-center/"; then PUSH_CRM=true; fi
-if $SHARED_CHANGED || _changed_in "artifacts/mobile-crm/";     then PUSH_MOBILE=true; fi
-if $SHARED_CHANGED || _changed_in "artifacts/website/";        then PUSH_WEBSITE=true; fi
-
-if ! $PUSH_CRM && ! $PUSH_MOBILE && ! $PUSH_WEBSITE; then
+if ! $PUSH_WEBSITE; then
   echo "No product directories changed — template sync skipped."
 else
   echo "--- Syncing changed template repos ---"
 
-  # Build an ordered push queue so that a mid-run failure can report both
-  # the broken product AND every repo that was skipped because of the early exit.
   PUSH_QUEUE=()
-  if $PUSH_CRM;     then PUSH_QUEUE+=("crm:CRM");       fi
-  if $PUSH_MOBILE;  then PUSH_QUEUE+=("mobile:Mobile");  fi
   if $PUSH_WEBSITE; then PUSH_QUEUE+=("website:Website"); fi
 
   for i in "${!PUSH_QUEUE[@]}"; do

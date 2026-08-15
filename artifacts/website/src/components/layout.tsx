@@ -249,8 +249,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           </div>
           <div className="pt-8 border-t border-white/5 flex flex-col md:flex-row items-center justify-between gap-4">
             <p className="text-muted-foreground/40 text-xs">
-              &copy; {new Date().getFullYear()} {BUSINESS.name}. Licensed & insured. All rights reserved. Powered by{' '}
-              <span className="text-muted-foreground/70">MogulForge GrowthOS</span>
+              &copy; {new Date().getFullYear()} {BUSINESS.name}. Licensed &amp; insured. All rights reserved.
             </p>
             <nav aria-label="Legal" className="flex flex-wrap gap-4">
               {[

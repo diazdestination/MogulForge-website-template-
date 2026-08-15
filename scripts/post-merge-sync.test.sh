@@ -44,8 +44,8 @@ make_repo() {
   git -C "$dir" config user.name  "CI Test"
   local i
   for i in $(seq 1 "$commits"); do
-    mkdir -p "$dir/artifacts/command-center"
-    echo "$i" > "$dir/artifacts/command-center/file.txt"
+    mkdir -p "$dir/artifacts/website"
+    echo "$i" > "$dir/artifacts/website/file.txt"
     git -C "$dir" add -A
     git -C "$dir" commit -q -m "commit $i"
   done
@@ -63,7 +63,7 @@ OUT1="$TMPROOT/out1.txt"
 
 # PUSH_ROOT_DIR overrides the script's ROOT_DIR so require_remote() inspects
 # the temp repo (no remotes) rather than the live workspace.
-if (cd "$REPO1" && PUSH_ROOT_DIR="$REPO1" bash "$SCRIPT_DIR/push-to-product-repos.sh" crm) >"$OUT1" 2>&1; then
+if (cd "$REPO1" && PUSH_ROOT_DIR="$REPO1" bash "$SCRIPT_DIR/push-to-product-repos.sh" website) >"$OUT1" 2>&1; then
   _fail "Expected non-zero exit when remote absent — got 0"
 else
   if grep -q "not configured" "$OUT1"; then
@@ -102,7 +102,7 @@ EXIT2=0
       exit 1
     }
   }
-  _push_product crm "CRM"
+  _push_product website "Website"
 ) >"$OUT2" 2>&1 || EXIT2=$?
 
 if [ "$EXIT2" -eq 0 ]; then
@@ -178,22 +178,18 @@ OUT4="$TMPROOT/out4.txt"
     || true)"
 
   # Replicate the gate from post-merge.sh:
-  #   if ! $PUSH_CRM && ! $PUSH_MOBILE && ! $PUSH_WEBSITE; then skip
+  #   if ! $PUSH_WEBSITE; then skip
   _changed_in() {
     [ -n "$CHANGED_FILES" ] && echo "$CHANGED_FILES" | grep -q "^${1}"
   }
-  PUSH_CRM=false
-  PUSH_MOBILE=false
   PUSH_WEBSITE=false
   SHARED_CHANGED=false
-  if _changed_in "artifacts/api-server/" || _changed_in "lib/" || _changed_in "scripts/"; then
+  if _changed_in "lib/" || _changed_in "scripts/"; then
     SHARED_CHANGED=true
   fi
-  if $SHARED_CHANGED || _changed_in "artifacts/command-center/"; then PUSH_CRM=true; fi
-  if $SHARED_CHANGED || _changed_in "artifacts/mobile-crm/";     then PUSH_MOBILE=true; fi
-  if $SHARED_CHANGED || _changed_in "artifacts/website/";        then PUSH_WEBSITE=true; fi
+  if $SHARED_CHANGED || _changed_in "artifacts/website/"; then PUSH_WEBSITE=true; fi
 
-  if ! $PUSH_CRM && ! $PUSH_MOBILE && ! $PUSH_WEBSITE; then
+  if ! $PUSH_WEBSITE; then
     echo "sync-skipped-cleanly"
   else
     echo "sync-would-run"   # fine too — we only care that we did not crash
@@ -256,19 +252,14 @@ OUT5="$TMPROOT/out5.txt"
   }
 
   SHARED_CHANGED=false
-  if _shared_changed_in "artifacts/api-server/" || _shared_changed_in "lib/" || _shared_changed_in "scripts/"; then
+  if _shared_changed_in "lib/" || _shared_changed_in "scripts/"; then
     SHARED_CHANGED=true
   fi
 
-  PUSH_CRM=false
-  PUSH_MOBILE=false
   PUSH_WEBSITE=false
+  if $SHARED_CHANGED || _changed_in "artifacts/website/"; then PUSH_WEBSITE=true; fi
 
-  if $SHARED_CHANGED || _changed_in "artifacts/command-center/"; then PUSH_CRM=true; fi
-  if $SHARED_CHANGED || _changed_in "artifacts/mobile-crm/";     then PUSH_MOBILE=true; fi
-  if $SHARED_CHANGED || _changed_in "artifacts/website/";        then PUSH_WEBSITE=true; fi
-
-  if ! $PUSH_CRM && ! $PUSH_MOBILE && ! $PUSH_WEBSITE; then
+  if ! $PUSH_WEBSITE; then
     echo "No product directories changed — template sync skipped."
   else
     # Should not reach here for a docs-only commit
@@ -308,12 +299,12 @@ ASSEMBLE6="$TMPROOT/assemble6"
 mkdir -p "$ASSEMBLE6/.github/workflows"
 
 # Replicate exactly the heredoc that push-to-product-repos.sh writes for the
-# 'crm' product (remote = crm-template) and the follow-up cp to the staged path.
-PRODUCT6="crm"
-REMOTE6="crm-template"
+# 'website' product (remote = website-template) and the follow-up cp to the staged path.
+PRODUCT6="website"
+REMOTE6="website-template"
 
 cat > "$ASSEMBLE6/.github/workflows/sync-from-upstream.yml" << YAML
-# Sync this template repo with the latest upstream Painless CRM monorepo.
+# Sync this template repo with the latest upstream monorepo.
 name: Sync from upstream monorepo
 
 on:
@@ -321,7 +312,7 @@ on:
     inputs:
       monorepo_url:
         description: >
-          HTTPS clone URL of the upstream Painless CRM monorepo.
+          HTTPS clone URL of the upstream monorepo.
           Leave blank to use the MONOREPO_URL repository secret.
         required: false
         type: string
@@ -361,7 +352,7 @@ jobs:
 
       - name: Configure git identity
         run: |
-          git config --global user.email "template-sync@painless-crm"
+          git config --global user.email "template-sync@painless-growthos"
           git config --global user.name "Template Sync"
 
       - name: Run export and push
@@ -562,8 +553,7 @@ _test_shared_changed() {
   }
 
   local SHARED_CHANGED=false
-  if _shared_changed_in_inner "artifacts/api-server/" \
-      || _shared_changed_in_inner "lib/" \
+  if _shared_changed_in_inner "lib/" \
       || _shared_changed_in_inner "scripts/"; then
     SHARED_CHANGED=true
   fi
@@ -605,45 +595,33 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Test 12: Partial push failure — the failing product is named, and any repos
-#          that were never attempted are listed as skipped.
-#
-#          Scenario: CRM push succeeds (mocked), Mobile push fails (mocked),
-#          Website push is never invoked.  The combined output must contain all
-#          three product names so an admin knows exactly what to re-run.
+# Test 12: Website push failure is FATAL — exits non-zero and prints ❌ error.
+#          Verifies the queue loop handles a failed push correctly even with a
+#          single-product queue.
 # ---------------------------------------------------------------------------
 echo ""
-echo "Test 12: Partial push failure — failing product named, skipped products listed"
+echo "Test 12: Website push failure — exits non-zero and prints ❌ error"
 
 OUT12="$TMPROOT/out12.txt"
 EXIT12=0
 
 (
-  # Mock push-to-product-repos.sh:
-  #   crm    → exits 0  (success)
-  #   mobile → exits 1  (failure)
-  #   website → should never be called; exits 2 if it is
+  # Mock push-to-product-repos.sh: website → exits 1 (failure)
   MOCK_PUSH12="$TMPROOT/mock-push12.sh"
   cat > "$MOCK_PUSH12" << 'MOCKEOF'
 #!/bin/bash
 case "$1" in
-  crm)     echo "CRM push OK (mock)";                      exit 0 ;;
-  mobile)  echo "Mobile push error (mock)" >&2;             exit 1 ;;
-  website) echo "Website should not have been called" >&2;  exit 2 ;;
-  *)       echo "Unknown product: $1" >&2;                  exit 3 ;;
+  website) echo "Website push error (mock)" >&2; exit 1 ;;
+  *)       echo "Unknown product: $1" >&2;        exit 3 ;;
 esac
 MOCKEOF
   chmod +x "$MOCK_PUSH12"
 
   # Replicate the queue-based loop from post-merge.sh verbatim, but call the
   # mock script instead of push-to-product-repos.sh.
-  PUSH_CRM=true
-  PUSH_MOBILE=true
   PUSH_WEBSITE=true
 
   PUSH_QUEUE=()
-  if $PUSH_CRM;     then PUSH_QUEUE+=("crm:CRM");       fi
-  if $PUSH_MOBILE;  then PUSH_QUEUE+=("mobile:Mobile");  fi
   if $PUSH_WEBSITE; then PUSH_QUEUE+=("website:Website"); fi
 
   for i in "${!PUSH_QUEUE[@]}"; do
@@ -669,20 +647,17 @@ MOCKEOF
 ) >"$OUT12" 2>&1 || EXIT12=$?
 
 if [ "$EXIT12" -eq 0 ]; then
-  _fail "Test 12: expected non-zero exit when Mobile push fails — got 0"
+  _fail "Test 12: expected non-zero exit when Website push fails — got 0"
   echo "    --- captured output ---"
   cat "$OUT12"
   echo "    -----------------------"
 else
   ISSUES12=()
-  grep -q "CRM"                         "$OUT12" || ISSUES12+=("'CRM' not mentioned in output")
-  grep -q "Mobile"                      "$OUT12" || ISSUES12+=("'Mobile' not mentioned (failing product)")
-  grep -q "Website"                     "$OUT12" || ISSUES12+=("'Website' not listed as skipped")
-  grep -q "❌"                          "$OUT12" || ISSUES12+=("no ❌ failure indicator in output")
-  grep -qi "skipped\|never attempted"  "$OUT12" || ISSUES12+=("no 'skipped / never attempted' message for Website")
+  grep -q "Website"  "$OUT12" || ISSUES12+=("'Website' not mentioned (failing product)")
+  grep -q "❌"       "$OUT12" || ISSUES12+=("no ❌ failure indicator in output")
 
   if [ "${#ISSUES12[@]}" -eq 0 ]; then
-    _pass "Partial failure: CRM named (succeeded), Mobile named (failed), Website listed as skipped"
+    _pass "Website push failure: exits non-zero with ❌ error message"
   else
     for issue in "${ISSUES12[@]}"; do
       _fail "Test 12: $issue"

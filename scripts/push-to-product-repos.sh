@@ -2,21 +2,17 @@
 # =============================================================================
 # push-to-product-repos.sh
 #
-# Assembles a standalone, rebrandable copy of one product and pushes it to its
+# Assembles a standalone, rebrandable copy of the website and pushes it to its
 # configured GitHub remote.
 #
 # Usage:
-#   ./scripts/push-to-product-repos.sh [crm|mobile|website|all]
+#   ./scripts/push-to-product-repos.sh [website|all]
 #
-# Before your first push you must point each remote at a real GitHub repo:
-#   git remote set-url crm-template    https://github.com/YOUR_ORG/crm-template.git
-#   git remote set-url mobile-template https://github.com/YOUR_ORG/mobile-template.git
+# Before your first push you must point the remote at a real GitHub repo:
 #   git remote set-url website-template https://github.com/YOUR_ORG/website-template.git
 #
-# What each product repo contains:
-#   crm      → artifacts/command-center + artifacts/api-server + lib/*
-#   mobile   → artifacts/mobile-crm     + artifacts/api-server + lib/*
-#   website  → artifacts/website        + artifacts/api-server + lib/*
+# What the product repo contains:
+#   website → artifacts/website + lib/* + scripts
 #
 # The repo is built in a temp directory, committed, and force-pushed. Every
 # push is idempotent — running it again just updates the remote to match HEAD.
@@ -57,9 +53,8 @@ require_remote() {
   echo "$url"
 }
 
-# Packages always included (shared libs + api-server)
+# Packages always included (shared libs)
 SHARED_DIRS=(
-  "artifacts/api-server"
   "lib"
   "scripts"
 )
@@ -117,10 +112,8 @@ push_product() {
   # Rewrite pnpm-workspace.yaml to only list the included artifacts
   cat > "$tmpdir/pnpm-workspace.yaml" << YAML
 packages:
-  - artifacts/api-server
   - artifacts/$artifact
   - lib/*
-  - lib/integrations/*
   - scripts
 
 autoInstallPeers: false
@@ -139,13 +132,13 @@ YAML
   # resync from GitHub without touching the monorepo locally.
   mkdir -p "$tmpdir/.github/workflows"
   cat > "$tmpdir/.github/workflows/sync-from-upstream.yml" << YAML
-# Sync this template repo with the latest upstream Painless CRM monorepo.
+# Sync this template repo with the latest upstream monorepo.
 #
 # How to use
 # ----------
 # 1. Add a secret named MONOREPO_URL to this repository's Settings → Secrets
-#    that contains the HTTPS clone URL of your upstream Painless CRM monorepo
-#    (e.g. https://<token>@github.com/YOUR_ORG/painless-crm.git).
+#    that contains the HTTPS clone URL of your upstream monorepo
+#    (e.g. https://<token>@github.com/YOUR_ORG/painless-growthos.git).
 # 2. Go to Actions → "Sync from upstream monorepo" → Run workflow.
 #
 # The workflow clones the monorepo, runs the export script for this product,
@@ -158,7 +151,7 @@ on:
     inputs:
       monorepo_url:
         description: >
-          HTTPS clone URL of the upstream Painless CRM monorepo.
+          HTTPS clone URL of the upstream monorepo.
           Leave blank to use the MONOREPO_URL repository secret.
         required: false
         type: string
@@ -200,7 +193,7 @@ jobs:
 
       - name: Configure git identity
         run: |
-          git config --global user.email "template-sync@painless-crm"
+          git config --global user.email "template-sync@painless-growthos"
           git config --global user.name "Template Sync"
 
       - name: Run export and push
@@ -257,22 +250,14 @@ YAML
 PRODUCT="${1:-all}"
 
 case "$PRODUCT" in
-  crm)
-    push_product "crm" "command-center" "crm-template"
-    ;;
-  mobile)
-    push_product "mobile" "mobile-crm" "mobile-template"
-    ;;
   website)
     push_product "website" "website" "website-template"
     ;;
   all)
-    push_product "crm"     "command-center" "crm-template"
-    push_product "mobile"  "mobile-crm"     "mobile-template"
-    push_product "website" "website"        "website-template"
+    push_product "website" "website" "website-template"
     ;;
   *)
-    die "Unknown product '$PRODUCT'. Choose: crm | mobile | website | all"
+    die "Unknown product '$PRODUCT'. Choose: website | all"
     ;;
 esac
 

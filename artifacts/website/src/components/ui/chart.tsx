@@ -99,16 +99,38 @@ ${colorConfig
 
 const ChartTooltip = RechartsPrimitive.Tooltip;
 
+type TooltipPayloadItem = {
+  value?: number | string;
+  name?: string;
+  dataKey?: string | number;
+  type?: string;
+  color?: string;
+  payload?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
 const ChartTooltipContent = React.forwardRef<
   HTMLDivElement,
-  React.ComponentProps<typeof RechartsPrimitive.Tooltip> &
-    React.ComponentProps<'div'> & {
-      hideLabel?: boolean;
-      hideIndicator?: boolean;
-      indicator?: 'line' | 'dot' | 'dashed';
-      nameKey?: string;
-      labelKey?: string;
-    }
+  React.ComponentProps<'div'> & {
+    active?: boolean;
+    payload?: TooltipPayloadItem[];
+    label?: string;
+    labelFormatter?: (label: unknown, payload: TooltipPayloadItem[]) => React.ReactNode;
+    labelClassName?: string;
+    formatter?: (
+      value: unknown,
+      name: string,
+      item: TooltipPayloadItem,
+      index: number,
+      payload: unknown,
+    ) => React.ReactNode;
+    color?: string;
+    hideLabel?: boolean;
+    hideIndicator?: boolean;
+    indicator?: 'line' | 'dot' | 'dashed';
+    nameKey?: string;
+    labelKey?: string;
+  }
 >(
   (
     {
@@ -183,11 +205,11 @@ const ChartTooltipContent = React.forwardRef<
         {!nestLabel ? tooltipLabel : null}
         <div className="grid gap-1.5">
           {payload
-            .filter((item) => item.type !== 'none')
-            .map((item, index) => {
+            .filter((item: TooltipPayloadItem) => item.type !== 'none')
+            .map((item: TooltipPayloadItem, index: number) => {
               const key = `${nameKey || item.name || item.dataKey || 'value'}`;
               const itemConfig = getPayloadConfigFromPayload(config, item, key);
-              const indicatorColor = color || item.payload.fill || item.color;
+              const indicatorColor = color || (item.payload as Record<string, unknown>)?.fill || item.color;
 
               return (
                 <div
@@ -284,7 +306,7 @@ const ChartLegendContent = React.forwardRef<
           className,
         )}
       >
-        {payload
+        {(payload as Array<{ type?: string; dataKey?: string | number; value?: unknown; color?: string; payload?: Record<string, unknown> }>)
           .filter((item) => item.type !== 'none')
           .map((item) => {
             const key = `${nameKey || item.dataKey || 'value'}`;
@@ -292,7 +314,7 @@ const ChartLegendContent = React.forwardRef<
 
             return (
               <div
-                key={item.value}
+                key={String(item.value)}
                 className={cn(
                   'flex items-center gap-1.5 [&>svg]:h-3 [&>svg]:w-3 [&>svg]:text-muted-foreground',
                 )}

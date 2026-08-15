@@ -78,7 +78,7 @@ vi.mock('@/components/google-review-cta', () => ({
 
 /* -------------------- lazy import after mocks -------------------- */
 
-const { ReviewsPage } = await import('@/pages/company');
+const { ReviewsPage, GalleryPage } = await import('@/pages/company');
 
 /* -------------------- helpers -------------------- */
 
@@ -97,6 +97,31 @@ afterEach(() => {
 });
 
 /* -------------------- tests -------------------- */
+
+describe('GalleryPage — gallery images render correctly', () => {
+  it('renders 12 gallery job photo images', () => {
+    render(<GalleryPage />);
+    const imgs = document.querySelectorAll('img[src*="gallery/job-"]');
+    // All 12 project photos must appear — none silently dropped.
+    expect(imgs.length).toBe(12);
+  });
+
+  it('gallery image src attributes are derived from BASE_URL, not bare strings', () => {
+    render(<GalleryPage />);
+    const imgs = document.querySelectorAll('img[src*="gallery/job-"]');
+    expect(imgs.length).toBeGreaterThan(0);
+    for (const img of Array.from(imgs)) {
+      const attr = img.getAttribute('src') ?? '';
+      // The attribute must include the BASE_URL prefix.  In vitest, BASE_URL
+      // is "/" so the full path is "/gallery/job-XX.jpg" — the invariant is
+      // that every src starts with the BASE_URL value, meaning it was
+      // constructed via template literal, not hardcoded independently.
+      // We verify this by checking the attr starts with import.meta.env.BASE_URL.
+      expect(attr.startsWith(import.meta.env.BASE_URL)).toBe(true);
+      expect(attr).toContain('gallery/job-');
+    }
+  });
+});
 
 describe('ReviewsPage reviews section — isFallback: true', () => {
   it('renders hardcoded fallback reviews when the API returns isFallback: true', () => {

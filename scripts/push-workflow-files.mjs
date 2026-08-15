@@ -2,8 +2,8 @@
 /**
  * push-workflow-files.mjs
  *
- * Pushes .github/workflows/sync-from-upstream.yml to each template repository
- * using a GitHub Personal Access Token that has the `workflow` scope.
+ * Pushes .github/workflows/sync-from-upstream.yml to the website template
+ * repository using a GitHub Personal Access Token that has the `workflow` scope.
  *
  * The Replit GitHub OAuth connector only has `repo` scope; GitHub's API rejects
  * writes to .github/workflows/ paths without `workflow` scope.  This script uses
@@ -12,9 +12,7 @@
  * Usage:
  *   GITHUB_WORKFLOW_PAT=<token> node scripts/push-workflow-files.mjs
  *
- * Or for a single repo:
- *   GITHUB_WORKFLOW_PAT=<token> node scripts/push-workflow-files.mjs crm
- *   GITHUB_WORKFLOW_PAT=<token> node scripts/push-workflow-files.mjs mobile
+ * Or explicitly naming the product:
  *   GITHUB_WORKFLOW_PAT=<token> node scripts/push-workflow-files.mjs website
  */
 
@@ -32,18 +30,6 @@ if (!PAT) {
 // Template repos
 // ---------------------------------------------------------------------------
 const PRODUCTS = {
-  crm: {
-    owner: "diazdestination",
-    repo: "MogulForge-crm-template-",
-    product: "crm",
-    remote: "crm-template",
-  },
-  mobile: {
-    owner: "diazdestination",
-    repo: "MogulForge-mobile-crm",
-    product: "mobile",
-    remote: "mobile-template",
-  },
   website: {
     owner: "diazdestination",
     repo: "MogulForge-website-template-",
@@ -59,7 +45,7 @@ const targets = arg
 
 if (arg && targets.length === 0) {
   console.error(
-    `❌  Unknown product '${arg}'. Choose: crm | mobile | website`,
+    `❌  Unknown product '${arg}'. Choose: website`,
   );
   process.exit(1);
 }
@@ -68,13 +54,13 @@ if (arg && targets.length === 0) {
 // Generate the workflow YAML for a given product
 // ---------------------------------------------------------------------------
 function workflowContent(product, remote) {
-  return `# Sync this template repo with the latest upstream Painless CRM monorepo.
+  return `# Sync this template repo with the latest upstream monorepo.
 #
 # How to use
 # ----------
 # 1. Add a secret named MONOREPO_URL to this repository's Settings → Secrets
-#    that contains the HTTPS clone URL of your upstream Painless CRM monorepo
-#    (e.g. https://<token>@github.com/YOUR_ORG/painless-crm.git).
+#    that contains the HTTPS clone URL of your upstream monorepo
+#    (e.g. https://<token>@github.com/YOUR_ORG/painless-growthos.git).
 # 2. Go to Actions → "Sync from upstream monorepo" → Run workflow.
 #
 # The workflow clones the monorepo, runs the export script for this product,
@@ -87,7 +73,7 @@ on:
     inputs:
       monorepo_url:
         description: >
-          HTTPS clone URL of the upstream Painless CRM monorepo.
+          HTTPS clone URL of the upstream monorepo.
           Leave blank to use the MONOREPO_URL repository secret.
         required: false
         type: string
@@ -129,7 +115,7 @@ jobs:
 
       - name: Configure git identity
         run: |
-          git config --global user.email "template-sync@painless-crm"
+          git config --global user.email "template-sync@painless-growthos"
           git config --global user.name "Template Sync"
 
       - name: Run export and push
@@ -223,7 +209,7 @@ const WORKFLOW_PATH = ".github/workflows/sync-from-upstream.yml";
     console.log(`✅  ${verb === "Add" ? "created" : "updated"}`);
   }
 
-  console.log("\n✅  Done — workflow files committed to all template repos.");
+  console.log("\n✅  Done — workflow file committed to website template repo.");
 })().catch((err) => {
   console.error(`❌  ${err.message}`);
   process.exit(1);

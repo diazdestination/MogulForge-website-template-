@@ -1,8 +1,6 @@
 packages:
-  - artifacts/api-server
   - artifacts/website
   - lib/*
-  - lib/integrations/*
   - scripts
 
 autoInstallPeers: false

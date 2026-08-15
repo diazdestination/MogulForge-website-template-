@@ -47,3 +47,9 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Generated smoke build output
+.smoke-dist
+
+# Expo generated type files
+expo-env.d.ts
