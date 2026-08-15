@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Link } from 'wouter';
-import { ArrowRight, HeartHandshake, MessageSquareQuote, Star, Wrench } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, HeartHandshake, MessageSquareQuote, Star, Wrench, X } from 'lucide-react';
 import { GoogleReviewCta } from '@/components/google-review-cta';
 import { Seo, breadcrumbJsonLd, localBusinessJsonLd } from '@/lib/seo';
 import { Breadcrumbs, CtaSection, PageHero, SectionHeading } from '@/components/page-blocks';
@@ -128,6 +129,13 @@ export function ReviewsPage() {
   );
 }
 
+interface LightboxItem {
+  src: string;
+  alt: string;
+  title: string;
+  where: string;
+  detail: string;
+}
 function GalleryImage({ src, alt, srcSet, sizes }: { src: string; alt: string; srcSet?: string; sizes?: string }) {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -192,6 +200,10 @@ function GalleryImage({ src, alt, srcSet, sizes }: { src: string; alt: string; s
 }
 
 export function GalleryPage() {
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  // Ref to the gallery button that opened the lightbox — used to restore focus on close
+  const activeTriggerRef = useRef<HTMLButtonElement | null>(null);
+
   // Paths are relative so Vite's BASE_URL prefix is applied correctly under
   // both "/" and "/site/" deployments. Never use root-absolute "/gallery/…" here.
   const base = import.meta.env.BASE_URL; // always ends with "/"
@@ -228,6 +240,7 @@ export function GalleryPage() {
     { img: `${base}gallery/damage-02.jpg`, title: 'Active roof failure — water intrusion after hail', where: 'Talking Rock, GA', detail: 'Hailstones streaming through a compromised ceiling into a living room — documented the same night as the storm. This is exactly what we prevent: emergency tarping within hours, water restoration started the next morning.' },
     { img: `${base}gallery/before-after-01-before.jpg`, title: 'Before — aged shingles, storm damage confirmed', where: 'North Georgia', detail: 'The old roof before our free inspection. Storm-related damage was confirmed, documented, and submitted to insurance. Tarp staged on-site while the claim was processed — homeowner paid $0 out of pocket.' },
     { img: `${base}gallery/before-after-01-after.jpg`, title: 'After — $0 out-of-pocket insurance replacement', where: 'North Georgia', detail: 'Finished light gray architectural shingles on the same home. Free inspection → insurance approval → complete replacement, all handled by our team. This homeowner never wrote a check.' },
+    { img: `${base}gallery/van-job-01.jpg`, title: 'On-site — branded service vehicle', where: 'North Georgia', detail: 'Our fully wrapped Mercedes Sprinter on a completed job — roofing, siding, and gutters. When you see the van in your neighborhood, a free inspection is available same day. Call 404-444-4476.' },
   ];
   return (
     <div className="flex-1">
@@ -248,20 +261,25 @@ export function GalleryPage() {
       <section className="pb-16">
         <div className="container mx-auto px-4 max-w-6xl">
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {projects.map((p) => {
+            {projects.map((p, i) => {
               // Derive the stem (strip extension) to build responsive WebP srcset paths.
               // p.img is e.g. `${base}gallery/job-02.webp` or `…/fb-job-01.jpg`
               const stem = p.img.replace(/\.[^.]+$/, '');
               return (
                 <div key={p.img} className="rounded-2xl overflow-hidden bg-card/40 border border-card-border flex flex-col group">
-                  <div className="aspect-[4/3] overflow-hidden">
+                  <button
+                    type="button"
+                    className="aspect-[4/3] overflow-hidden cursor-zoom-in focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2"
+                    onClick={(e) => { activeTriggerRef.current = e.currentTarget; setLightboxIndex(i); }}
+                    aria-label={`View full-size: ${p.title} — ${p.where}`}
+                  >
                     <GalleryImage
                       src={p.img}
                       alt={`${p.title} — ${p.where}`}
-                      srcSet={`${stem}-400.webp 400w, ${stem}-800.webp 800w`}
+                      srcSet={p.img.endsWith('.webp') ? `${stem}-400.webp 400w, ${stem}-800.webp 800w` : undefined}
                       sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
                     />
-                  </div>
+                  </button>
                   <div className="p-5 flex flex-col flex-1">
                     <h2 className="font-display font-semibold text-white text-base mb-1">{p.title}</h2>
                     <p className="text-xs uppercase tracking-wider text-primary/80 mb-2">{p.where}</p>
@@ -271,6 +289,13 @@ export function GalleryPage() {
               );
             })}
           </div>
+          <Lightbox
+            items={projects.map((p) => ({ src: p.img, alt: `${p.title} — ${p.where}`, title: p.title, where: p.where, detail: p.detail }))}
+            initialIndex={lightboxIndex ?? 0}
+            open={lightboxIndex !== null}
+            onOpenChange={(open) => { if (!open) setLightboxIndex(null); }}
+            triggerRef={activeTriggerRef}
+          />
         </div>
       </section>
       <CtaSection trackLabel="gallery" />
@@ -361,5 +386,134 @@ export function ResourcesPage() {
       </section>
       <CtaSection trackLabel="resources" />
     </div>
+  );
+}
+
+/**
+ * Lightbox uses Radix Dialog for correct focus-trap, Escape handling, and
+ * return-focus-to-trigger behaviour.  The caller passes a triggerRef so the
+ * dialog knows which button to restore focus to on close.
+ */
+function Lightbox({
+  items,
+  initialIndex,
+  open,
+  onOpenChange,
+  triggerRef,
+}: {
+  items: LightboxItem[];
+  initialIndex: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  triggerRef: React.RefObject<HTMLButtonElement | null>;
+}) {
+  const [index, setIndex] = useState(initialIndex);
+  const touchStartX = useRef<number | null>(null);
+
+  // Sync photo when caller opens a new card
+  useEffect(() => { if (open) setIndex(initialIndex); }, [open, initialIndex]);
+
+  const prev = useCallback(() => setIndex((i) => (i - 1 + items.length) % items.length), [items.length]);
+  const next = useCallback(() => setIndex((i) => (i + 1) % items.length), [items.length]);
+
+  const item = items[index];
+  const fallbackSrc = item.src.endsWith('.webp') ? item.src.replace(/\.webp$/, '.jpg') : item.src;
+  const stem = item.src.replace(/\.[^.]+$/, '');
+
+  return (
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+      <DialogPrimitive.Portal>
+        {/* Backdrop — Radix inerts background content for assistive technology */}
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm" />
+
+        {/* Content — Radix traps focus within and restores to trigger on close */}
+        <DialogPrimitive.Content
+          aria-label={item.alt}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 focus:outline-none"
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
+            if (e.key === 'ArrowRight') { e.preventDefault(); next(); }
+          }}
+          onCloseAutoFocus={(e) => {
+            // Restore focus to the gallery card that opened the lightbox
+            e.preventDefault();
+            triggerRef.current?.focus();
+          }}
+          onTouchStart={(e) => { touchStartX.current = e.touches[0].clientX; }}
+          onTouchEnd={(e) => {
+            if (touchStartX.current === null) return;
+            const delta = e.changedTouches[0].clientX - touchStartX.current;
+            if (Math.abs(delta) > 50) delta < 0 ? next() : prev();
+            touchStartX.current = null;
+          }}
+        >
+          <div className="flex flex-col max-w-5xl w-full">
+            {/* Top bar */}
+            <div className="flex items-center justify-between mb-3 px-1">
+              <p className="text-xs text-white/50 tabular-nums">{index + 1} / {items.length}</p>
+              <DialogPrimitive.Close
+                aria-label="Close lightbox"
+                className="p-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-colors focus-visible:outline-2 focus-visible:outline-white"
+              >
+                <X className="w-5 h-5" aria-hidden />
+              </DialogPrimitive.Close>
+            </div>
+
+            {/* Image */}
+            <div className="relative rounded-2xl overflow-hidden bg-card/60">
+              <picture>
+                {item.src.endsWith('.webp') && (
+                  <source
+                    srcSet={`${stem}-400.webp 400w, ${stem}-800.webp 800w, ${item.src} 1600w`}
+                    type="image/webp"
+                    sizes="(min-width: 1024px) 80vw, 95vw"
+                  />
+                )}
+                <img
+                  key={item.src}
+                  src={fallbackSrc}
+                  alt={item.alt}
+                  className="w-full object-contain max-h-[60dvh]"
+                  decoding="async"
+                />
+              </picture>
+
+              {/* Prev / Next */}
+              {items.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={prev}
+                    aria-label="Previous photo"
+                    className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-black/75 transition-colors focus-visible:outline-2 focus-visible:outline-white"
+                  >
+                    <ChevronLeft className="w-6 h-6" aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={next}
+                    aria-label="Next photo"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-black/75 transition-colors focus-visible:outline-2 focus-visible:outline-white"
+                  >
+                    <ChevronRight className="w-6 h-6" aria-hidden />
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* Caption — DialogPrimitive.Title satisfies the accessible name requirement */}
+            <div className="mt-3 px-1">
+              <DialogPrimitive.Title className="font-display font-semibold text-white text-sm">
+                {item.title}
+              </DialogPrimitive.Title>
+              <p className="text-xs text-primary/80 mt-0.5 mb-1">{item.where}</p>
+              <DialogPrimitive.Description className="text-xs text-white/60 leading-relaxed">
+                {item.detail}
+              </DialogPrimitive.Description>
+            </div>
+          </div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }

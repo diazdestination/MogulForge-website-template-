@@ -101,14 +101,14 @@ afterEach(() => {
 describe('GalleryPage — gallery images render correctly', () => {
   it('renders 12 gallery job photo images', () => {
     render(<GalleryPage />);
-    const imgs = document.querySelectorAll('img[src*="gallery/job-"]');
+      const imgs = document.querySelectorAll<HTMLImageElement>('img[src*="gallery/"]');
     // All 12 project photos must appear — none silently dropped.
     expect(imgs.length).toBe(12);
   });
 
   it('gallery image src attributes are derived from BASE_URL, not bare strings', () => {
     render(<GalleryPage />);
-    const imgs = document.querySelectorAll('img[src*="gallery/job-"]');
+      const imgs = document.querySelectorAll<HTMLImageElement>('img[src*="gallery/"]');
     expect(imgs.length).toBeGreaterThan(0);
     for (const img of Array.from(imgs)) {
       const attr = img.getAttribute('src') ?? '';
@@ -122,19 +122,22 @@ describe('GalleryPage — gallery images render correctly', () => {
     }
   });
 
-  it('WebP job images fall back to JPEG: <source> carries the .webp and <img> src is .jpg', () => {
+  it('WebP job images fall back to JPEG: <source> carries .webp entries and <img> src is .jpg', () => {
     render(<GalleryPage />);
-    // Every <source type="image/webp"> must reference .webp files (srcset may
-    // be a responsive descriptor list like "foo-400.webp 400w, foo-800.webp 800w")
+    // Every <source type="image/webp"> must reference only .webp files
+    // (srcset may be a responsive list like "foo-400.webp 400w, foo-800.webp 800w")
     const sources = document.querySelectorAll<HTMLSourceElement>('source[type="image/webp"]');
     expect(sources.length).toBeGreaterThan(0);
     for (const src of Array.from(sources)) {
-      expect(src.srcset).toContain('.webp');
+      for (const entry of src.srcset.split(',').map((s) => s.trim())) {
+        // Each descriptor is "<url> [width]" — the URL part must end in .webp
+        expect(entry.split(/\s+/)[0]).toMatch(/\.webp$/);
+      }
     }
     // The corresponding <img> inside each <picture> must have the .jpg fallback
     const pictures = document.querySelectorAll('picture');
     for (const pic of Array.from(pictures)) {
-      const img = pic.querySelector('img');
+    const img = document.querySelector<HTMLImageElement>('img[src*="gallery/"]');
       expect(img).not.toBeNull();
       expect(img!.getAttribute('src')).toMatch(/\.jpg$/);
     }
@@ -188,6 +191,89 @@ describe('GalleryPage — gallery images render correctly', () => {
 
     // The original <img> element must be gone (replaced by the placeholder div)
     expect(document.querySelector(`img[alt="${altText}"]`)).toBeNull();
+  });
+});
+
+describe('GalleryPage — lightbox', () => {
+  it('opens the lightbox when a gallery card is clicked', async () => {
+    render(<GalleryPage />);
+    const btn = document.querySelector<HTMLButtonElement>('button[aria-label^="View full-size:"]');
+    expect(btn).not.toBeNull();
+    await act(async () => { fireEvent.click(btn!); });
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  it('closes the lightbox when Escape is pressed', async () => {
+    render(<GalleryPage />);
+    const btn = document.querySelector<HTMLButtonElement>('button[aria-label^="View full-size:"]');
+    expect(btn).not.toBeNull();
+    await act(async () => { fireEvent.click(btn!); });
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  it('closes the lightbox when Escape is pressed', async () => {
+    render(<GalleryPage />);
+    const btn = document.querySelector<HTMLButtonElement>('button[aria-label^="View full-size:"]');
+    await act(async () => { fireEvent.click(btn!); });
+    const closeBtn = document.querySelector<HTMLButtonElement>('button[aria-label="Close lightbox"]');
+    expect(closeBtn).not.toBeNull();
+    await act(async () => { fireEvent.click(closeBtn!); });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('navigates to the next photo with ArrowRight', async () => {
+    render(<GalleryPage />);
+    // Open the first card (index 0)
+    const cards = document.querySelectorAll<HTMLButtonElement>('button[aria-label^="View full-size:"]');
+
+    const trigger = cards[2];
+
+    const hiddenEls = document.querySelectorAll('[aria-hidden="true"]');
+    await act(async () => { fireEvent.click(cards[0]); });
+
+    const dialog = document.querySelector('[role="dialog"]')!;
+
+      const startEvt = new Event('touchstart', { bubbles: true, cancelable: true });
+    expect(dialog.getAttribute('aria-hidden')).not.toBe('true');
+  });
+
+  it('advances to the next photo on a left swipe gesture', async () => {
+    render(<GalleryPage />);
+    const cards = document.querySelectorAll<HTMLButtonElement>('button[aria-label^="View full-size:"]');
+
+    const trigger = cards[2];
+
+    const hiddenEls = document.querySelectorAll('[aria-hidden="true"]');
+    await act(async () => { fireEvent.click(cards[0]); });
+
+    const dialog = document.querySelector('[role="dialog"]')!;
+
+      const startEvt = new Event('touchstart', { bubbles: true, cancelable: true });
+    expect(dialog.getAttribute('aria-hidden')).not.toBe('true');
+  });
+
+  it('advances to the next photo on a left swipe gesture', async () => {
+    render(<GalleryPage />);
+    const cards = document.querySelectorAll<HTMLButtonElement>('button[aria-label^="View full-size:"]');
+
+    const trigger = cards[2];
+
+    const hiddenEls = document.querySelectorAll('[aria-hidden="true"]');
+    await act(async () => { fireEvent.click(cards[0]); });
+
+    const dialog = document.querySelector('[role="dialog"]')!;
+
+      const startEvt = new Event('touchstart', { bubbles: true, cancelable: true });
+    const nextBtn = dialog.querySelector<HTMLButtonElement>('button[aria-label="Next photo"]');
+    expect(nextBtn).not.toBeNull();
+    await act(async () => { fireEvent.click(nextBtn!); });
+    expect(dialog.textContent).toContain('2 /');
+
+    const prevBtn = dialog.querySelector<HTMLButtonElement>('button[aria-label="Previous photo"]');
+      Object.defineProperty(endEvt, 'changedTouches', { value: [{ clientX: 100 }] });
+      dialog.dispatchEvent(endEvt);
+    });
+    expect(dialog.textContent).toContain('2 /');
   });
 });
 
@@ -284,3 +370,7 @@ describe('ReviewsPage reviews section — isFallback: true', () => {
     ).toBeNull();
   });
 });
+
+      const endEvt = new Event('touchend', { bubbles: true, cancelable: true });
+
+    const focusSpy = vi.spyOn(trigger, 'focus');
