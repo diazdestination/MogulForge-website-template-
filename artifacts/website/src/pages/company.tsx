@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'wouter';
 import { ArrowRight, HeartHandshake, MessageSquareQuote, Star, Wrench } from 'lucide-react';
 import { GoogleReviewCta } from '@/components/google-review-cta';
@@ -127,6 +128,48 @@ export function ReviewsPage() {
   );
 }
 
+function GalleryImage({ src, alt }: { src: string; alt: string }) {
+  const [loaded, setLoaded] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  // Catch images that were already decoded before React attached the listener
+  // (common for cached assets after hydration).
+  useEffect(() => {
+    const img = imgRef.current;
+    if (img && img.complete && img.naturalWidth > 0) {
+      setLoaded(true);
+    }
+  }, []);
+
+  // Derive JPEG fallback: swap .webp → .jpg; JPEGs are their own fallback
+  const fallbackSrc = src.endsWith('.webp') ? src.replace(/\.webp$/, '.jpg') : src;
+  const isWebp = src.endsWith('.webp');
+  return (
+    <div className="relative w-full h-full">
+      {/* Skeleton shown until the image is ready or has errored */}
+      {!loaded && (
+        <div
+          aria-hidden
+          className="absolute inset-0 bg-gradient-to-br from-card/80 to-primary/10 animate-pulse"
+        />
+      )}
+      <picture>
+        {isWebp && <source srcSet={src} type="image/webp" />}
+        <img
+          ref={imgRef}
+          src={fallbackSrc}
+          alt={alt}
+          className={`w-full h-full object-cover group-hover:scale-105 transition-all duration-500 motion-reduce:transition-none ${loaded ? 'opacity-100' : 'opacity-0'}`}
+          loading="lazy"
+          decoding="async"
+          onLoad={() => setLoaded(true)}
+          onError={() => setLoaded(true)}
+        />
+      </picture>
+    </div>
+  );
+}
+
 export function GalleryPage() {
   // Paths are relative so Vite's BASE_URL prefix is applied correctly under
   // both "/" and "/site/" deployments. Never use root-absolute "/gallery/…" here.
@@ -170,13 +213,7 @@ export function GalleryPage() {
             {projects.map((p) => (
               <div key={p.img} className="rounded-2xl overflow-hidden bg-card/40 border border-card-border flex flex-col group">
                 <div className="aspect-[4/3] overflow-hidden">
-                  <img
-                    src={p.img}
-                    alt={`${p.title} — ${p.where}`}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 motion-reduce:transition-none"
-                    loading="lazy"
-                    decoding="async"
-                  />
+                  <GalleryImage src={p.img} alt={`${p.title} — ${p.where}`} />
                 </div>
                 <div className="p-5 flex flex-col flex-1">
                   <h2 className="font-display font-semibold text-white text-base mb-1">{p.title}</h2>

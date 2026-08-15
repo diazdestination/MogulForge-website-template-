@@ -5,7 +5,7 @@
  * reviews rather than crashing or showing a blank section.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
 
@@ -120,6 +120,65 @@ describe('GalleryPage — gallery images render correctly', () => {
       expect(attr.startsWith(import.meta.env.BASE_URL)).toBe(true);
       expect(attr).toContain('gallery/job-');
     }
+  });
+
+  it('WebP job images fall back to JPEG: <source> carries the .webp and <img> src is .jpg', () => {
+    render(<GalleryPage />);
+    // Every <source type="image/webp"> must point to a .webp file
+    const sources = document.querySelectorAll<HTMLSourceElement>('source[type="image/webp"]');
+    expect(sources.length).toBeGreaterThan(0);
+    for (const src of Array.from(sources)) {
+      expect(src.srcset).toMatch(/\.webp$/);
+    }
+    // The corresponding <img> inside each <picture> must have the .jpg fallback
+    const pictures = document.querySelectorAll('picture');
+    for (const pic of Array.from(pictures)) {
+      const img = pic.querySelector('img');
+      expect(img).not.toBeNull();
+      expect(img!.getAttribute('src')).toMatch(/\.jpg$/);
+    }
+  });
+
+  it('becomes visible immediately when the image was already decoded before mount (cached asset)', async () => {
+    // Simulate a browser that had the images cached: .complete is true and
+    // naturalWidth is positive before React attaches the onLoad listener.
+    const originalComplete = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'complete');
+    const originalNaturalWidth = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'naturalWidth');
+
+    Object.defineProperty(HTMLImageElement.prototype, 'complete', { configurable: true, get: () => true });
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', { configurable: true, get: () => 400 });
+
+    try {
+      await act(async () => { render(<GalleryPage />); });
+
+      const imgs = document.querySelectorAll<HTMLImageElement>('img[src*="gallery/"]');
+      expect(imgs.length).toBeGreaterThan(0);
+      for (const img of Array.from(imgs)) {
+        // The useEffect must have detected img.complete and set loaded=true,
+        // so opacity-0 must be absent and opacity-100 must be present.
+        expect(img.classList.contains('opacity-0')).toBe(false);
+        expect(img.classList.contains('opacity-100')).toBe(true);
+      }
+    } finally {
+      if (originalComplete) Object.defineProperty(HTMLImageElement.prototype, 'complete', originalComplete);
+      if (originalNaturalWidth) Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', originalNaturalWidth);
+    }
+  });
+
+  it('dismisses the loading skeleton when an image fails to load', async () => {
+    await act(async () => { render(<GalleryPage />); });
+
+    const img = document.querySelector<HTMLImageElement>('img[src*="gallery/"]');
+    expect(img).not.toBeNull();
+
+    // Image starts hidden (skeleton visible) because jsdom never fires onLoad
+    expect(img!.classList.contains('opacity-0')).toBe(true);
+
+    // Fire an error event (e.g. 404 or network timeout)
+    await act(async () => { fireEvent.error(img!); });
+
+    // The skeleton must clear so the card stays usable instead of blank forever
+    expect(img!.classList.contains('opacity-0')).toBe(false);
   });
 });
 
